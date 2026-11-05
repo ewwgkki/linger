@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use linger_lib::derive::{derive, RawTags};
 use linger_lib::tags::read_audio_info;
 use serde_json::Value;
 
@@ -69,6 +70,15 @@ fn parity_with_web_library() {
         cmp("album", i.album.clone(), st("album"));
         cmp("albumartist", i.albumartist.clone(), st("albumartist"));
         cmp("track", i.track.to_string(), tag["track"].as_i64().unwrap_or(0).to_string());
+        let raw = RawTags {
+            title: i.title.clone(), artist: i.artist.clone(), album: i.album.clone(),
+            albumartist: i.albumartist.clone(), track: i.track,
+        };
+        let dv = derive(rel, &raw, i.duration);
+        cmp("derive.t", dv.title, s["t"].as_str().unwrap_or_default().to_string());
+        cmp("derive.a", dv.artist, s["a"].as_str().unwrap_or_default().to_string());
+        cmp("derive.b", dv.album, s["b"].as_str().unwrap_or_default().to_string());
+        cmp("derive.n", dv.track.to_string(), s["n"].as_i64().unwrap_or(0).to_string());
         if !diffs.is_empty() {
             bad += 1;
             println!("MISMATCH #{n} {}\n    {}", path.display(), diffs.join("\n    "));
