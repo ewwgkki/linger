@@ -1,3 +1,4 @@
+pub mod tags;
 pub mod text;
 
 pub fn run() {
