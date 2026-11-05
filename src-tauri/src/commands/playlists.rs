@@ -10,7 +10,7 @@ use crate::db::{Db, DbError, Snapshot};
 use crate::state::AppState;
 
 const NOT_FOUND: &str = "playlist.notFound";
-const MAX_NAME: usize = 100;
+pub(crate) const MAX_NAME: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PlaylistDto { pub id: i64, pub name: String, pub count: usize, pub dur: f64 }

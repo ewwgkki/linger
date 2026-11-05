@@ -12,7 +12,7 @@ use crate::import::matcher::{LibSong, Matcher};
 use crate::import::{decode_text, parse_zip, playlist_name_from_file, spotify_json, csv, ParseError, SpPlaylist};
 use crate::state::AppState;
 
-use super::playlists::PlaylistsChanged;
+use super::playlists::{PlaylistsChanged, MAX_NAME};
 
 const MAX_FILE: u64 = 50 * 1024 * 1024;
 const LOSSLESS: [&str; 4] = ["pcm", "flac", "alac", "ape"];
@@ -36,13 +36,25 @@ pub struct FailedDto { pub source: String, pub reason: String }
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct ImportReport { pub playlists: Vec<ImportedDto>, pub failed: Vec<FailedDto> }
 
-/// "x" -> "x (2)" -> "x (3)" until the name is free.
+/// First `max` chars of `s`, trailing whitespace dropped.
+fn clip(s: &str, max: usize) -> &str {
+    s.char_indices().nth(max).map_or(s, |(b, _)| &s[..b]).trim_end()
+}
+
+/// "x" -> "x (2)" -> "x (3)" until the name is free. The name is trimmed ("Spotify" if empty)
+/// and shortened so the result, suffix included, stays within MAX_NAME chars.
 pub fn unique_name(existing: &[String], want: &str) -> String {
-    if !existing.iter().any(|n| n == want) {
-        return want.to_string();
+    let want = want.trim();
+    let want = if want.is_empty() { "Spotify" } else { want };
+    let base = clip(want, MAX_NAME);
+    if !existing.iter().any(|n| n == base) {
+        return base.to_string();
     }
     (2..)
-        .map(|i| format!("{want} ({i})"))
+        .map(|i| {
+            let suffix = format!(" ({i})");
+            format!("{}{suffix}", clip(want, MAX_NAME - suffix.chars().count()))
+        })
         .find(|n| !existing.iter().any(|e| e == n))
         .unwrap()
 }
@@ -202,6 +214,23 @@ mod tests {
         let ex = vec!["x".to_string(), "x (2)".to_string()];
         assert_eq!(unique_name(&ex, "x"), "x (3)");
         assert_eq!(unique_name(&ex, "y"), "y");
+    }
+
+    #[test]
+    fn unique_name_trims_defaults_and_truncates() {
+        assert_eq!(unique_name(&[], "  x  "), "x");
+        assert_eq!(unique_name(&[], "   "), "Spotify");
+        assert_eq!(unique_name(&["Spotify".to_string()], ""), "Spotify (2)");
+        let long = "字".repeat(150);
+        let first = unique_name(&[], &long);
+        assert_eq!(first, "字".repeat(100));
+        let second = unique_name(&[first.clone()], &long);
+        assert_eq!(second, format!("{} (2)", "字".repeat(96)));
+        assert_eq!(second.chars().count(), 100);
+        let mut ex = vec![first, second];
+        for i in 3..=10 { ex.push(format!("{} ({i})", "字".repeat(if i < 10 { 96 } else { 95 }))); }
+        let next = unique_name(&ex, &long);
+        assert_eq!(next, format!("{} (11)", "字".repeat(95)));
     }
 
     #[test]

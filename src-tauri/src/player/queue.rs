@@ -162,6 +162,23 @@ impl Queue {
         (v, rest.len())
     }
 
+    /// The id at `index` of the part, if any.
+    pub fn at(&self, part: Part, index: usize) -> Option<&str> {
+        match part {
+            Part::Up => self.up.get(index).map(String::as_str),
+            Part::Ctx => self.order.get(self.pos + 1 + index).and_then(|&i| self.items.get(i)).map(String::as_str),
+        }
+    }
+
+    pub fn clear_up(&mut self) {
+        self.up.clear();
+    }
+
+    /// Songs that can still be tried: the source plus the user queue.
+    pub fn total_len(&self) -> usize {
+        self.items.len() + self.up.len()
+    }
+
     fn ctx_len(&self) -> usize {
         self.order.len().saturating_sub(self.pos + 1)
     }
@@ -526,6 +543,23 @@ mod tests {
         assert_eq!(q.up_next(), ["x"]);
         assert_eq!(q.upcoming(10).0, ["b", "c"]);
         assert_eq!(q.len(), 3);
+    }
+
+    #[test]
+    fn at_clear_up_and_total_len() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 1, false);
+        q.add_last(s(&["x", "y"]));
+        assert_eq!(q.at(Part::Up, 1), Some("y"));
+        assert_eq!(q.at(Part::Up, 2), None);
+        assert_eq!(q.at(Part::Ctx, 0), Some("c"));
+        assert_eq!(q.at(Part::Ctx, 1), Some("a"));
+        assert_eq!(q.at(Part::Ctx, 2), None);
+        assert_eq!(q.total_len(), 5);
+        q.clear_up();
+        assert!(q.up_next().is_empty());
+        assert_eq!(q.total_len(), 3);
+        assert_eq!(q.current(), Some("b"));
     }
 
     #[test]

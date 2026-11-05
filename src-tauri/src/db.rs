@@ -153,18 +153,26 @@ fn fav_remove(c: &Connection, song_ids: &[String]) -> Result<usize> {
     Ok(n)
 }
 fn norm(s: &str) -> String { s.trim().to_lowercase() }
+/// Library songs indexed by file size, built once per relink pass.
+type SizeIndex = HashMap<u64, Vec<(String, Snapshot)>>;
+fn size_index(c: &Connection) -> Result<SizeIndex> {
+    let mut st = c.prepare(
+        "SELECT s.id, s.title, s.artist, s.album, s.duration, f.size FROM songs s JOIN files f ON f.id=s.file_id")?;
+    let mut idx: SizeIndex = HashMap::new();
+    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, snap_of(r, 1)?)))? {
+        let (id, sn) = row?;
+        idx.entry(sn.size).or_default().push((id, sn));
+    }
+    Ok(idx)
+}
 /// The single library song matching a snapshot (same file size, duration within 1s,
 /// same trimmed case-insensitive title and artist); None if zero or several match.
-fn unique_candidate(c: &Connection, sn: &Snapshot) -> Result<Option<(String, Snapshot)>> {
-    let mut st = c.prepare(
-        "SELECT s.id, s.title, s.artist, s.album, s.duration, f.size FROM songs s JOIN files f ON f.id=s.file_id
-         WHERE f.size=?1 AND abs(s.duration-?2) <= 1.0")?;
-    let rows = st.query_map(params![sn.size as i64, sn.duration], |r| Ok((r.get::<_, String>(0)?, snap_of(r, 1)?)))?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
+fn unique_candidate(idx: &SizeIndex, sn: &Snapshot) -> Option<(String, Snapshot)> {
     let (t, a) = (norm(&sn.title), norm(&sn.artist));
-    let mut m = rows.into_iter().filter(|(_, x)| norm(&x.title) == t && norm(&x.artist) == a);
+    let mut m = idx.get(&sn.size)?.iter()
+        .filter(|(_, x)| (x.duration - sn.duration).abs() <= 1.0 && norm(&x.title) == t && norm(&x.artist) == a);
     let first = m.next();
-    Ok(if m.next().is_some() { None } else { first })
+    if m.next().is_some() { None } else { first.cloned() }
 }
 
 fn schema_version(c: &Connection) -> Result<i64> {
@@ -452,15 +460,6 @@ impl Db {
             let v = st.query_map([], |r| Ok((r.get(0)?, snap_of(r, 1)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
             v
         };
-        for (old, sn) in favs {
-            let Some((new, ns)) = unique_candidate(&tx, &sn)? else { continue };
-            tx.execute(
-                "INSERT OR IGNORE INTO favorites(song_id,title,artist,album,duration,size,added)
-                 SELECT ?2,?3,?4,?5,?6,?7,added FROM favorites WHERE song_id=?1",
-                params![old, new, ns.title, ns.artist, ns.album, ns.duration, ns.size as i64])?;
-            tx.execute("DELETE FROM favorites WHERE song_id=?1", [&old])?;
-            n += 1;
-        }
         let items: Vec<(i64, i64, Snapshot)> = {
             let mut st = tx.prepare(
                 "SELECT id, playlist_id, title, artist, album, duration, size, song_id FROM playlist_items
@@ -468,8 +467,19 @@ impl Db {
             let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, snap_of(r, 2)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
             v
         };
+        if favs.is_empty() && items.is_empty() { return Ok(0); }
+        let idx = size_index(&tx)?;
+        for (old, sn) in favs {
+            let Some((new, ns)) = unique_candidate(&idx, &sn) else { continue };
+            tx.execute(
+                "INSERT OR IGNORE INTO favorites(song_id,title,artist,album,duration,size,added)
+                 SELECT ?2,?3,?4,?5,?6,?7,added FROM favorites WHERE song_id=?1",
+                params![old, new, ns.title, ns.artist, ns.album, ns.duration, ns.size as i64])?;
+            tx.execute("DELETE FROM favorites WHERE song_id=?1", [&old])?;
+            n += 1;
+        }
         for (item, pl, sn) in items {
-            let Some((new, ns)) = unique_candidate(&tx, &sn)? else { continue };
+            let Some((new, ns)) = unique_candidate(&idx, &sn) else { continue };
             let exists: i64 = tx.query_row(
                 "SELECT count(*) FROM playlist_items WHERE playlist_id=?1 AND song_id=?2", params![pl, new], |r| r.get(0))?;
             if exists > 0 {
@@ -780,6 +790,37 @@ mod tests {
         mk(&mut db, "b.mp3", "Yesterday", "The Beatles", 500, 100.0);
         assert_eq!(db.relink_missing().unwrap(), 0);
         assert_eq!(db.favorites().unwrap()[0].song_id, a);
+    }
+    #[test] fn relink_many_missing_is_fast() {
+        let mut db = Db::open_in_memory().unwrap();
+        let r = db.add_root(ROOT).unwrap();
+        for i in 0..10000u32 {
+            let rel = format!("f{i}.mp3");
+            let mut m = meta(&rel); m.size = 1000 + i as u64;
+            db.replace_file(r.id, &m, &[song(ROOT, &rel, 0, i)]).unwrap();
+        }
+        let pl = db.create_playlist("p", 1).unwrap();
+        {
+            let tx = db.conn.transaction().unwrap();
+            for i in 0..2000u32 {
+                // even: matches library song f{i} (title t{i}, size 1000+i); odd: no match
+                let size = if i % 2 == 0 { 1000 + i as i64 } else { 900_000 + i as i64 };
+                tx.execute(
+                    "INSERT INTO playlist_items(playlist_id,pos,song_id,title,artist,album,duration,size,added)
+                     VALUES(?1,?2,?3,?4,'a','b',1.5,?5,1)",
+                    params![pl, i, format!("gone{i}"), format!("T{i} "), size]).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let t = std::time::Instant::now();
+        assert_eq!(db.relink_missing().unwrap(), 1000);
+        assert!(t.elapsed().as_secs_f64() < 1.0, "{:?}", t.elapsed());
+        let items = db.playlist_items(pl).unwrap();
+        assert_eq!(items[0].song_id, song_id(ROOT, "f0.mp3", 0));
+        assert_eq!(items[1].song_id, "gone1");
+        let t = std::time::Instant::now();
+        assert_eq!(db.relink_missing().unwrap(), 0);
+        assert!(t.elapsed().as_secs_f64() < 1.0, "{:?}", t.elapsed());
     }
     #[test] fn saved_ids_and_memberships() {
         let mut db = Db::open_in_memory().unwrap();

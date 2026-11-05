@@ -239,7 +239,7 @@ fn fail(app: &AppHandle, i: &mut Inner, e: DecodeError) {
     let _ = app.emit("player://error", ErrorEvent { id: i.id.clone(), reason: error_reason(&e) });
     i.loaded = false;
     i.failures += 1;
-    let action = on_error(i.failures, i.queue.len());
+    let action = on_error(i.failures, i.queue.total_len());
     if action == ErrorAction::Stop {
         i.playing = false;
         i.failures = 0;
@@ -515,30 +515,42 @@ pub fn player_queue_add(ids: Vec<String>, next: bool, app: AppHandle, state: Sta
     emit_queue(&app);
 }
 
-#[tauri::command]
-pub fn player_queue_remove(part: String, index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let part = Part::parse(&part).ok_or("queue.badPart")?;
-    if !state.player.inner().queue.remove(part, index) {
-        return Err("queue.badIndex".into());
-    }
-    emit_queue(&app);
-    Ok(())
+/// The queue entry at `index` must still be `id` (the drawer's view may be stale after a song change).
+fn check_at(i: &Inner, part: Part, index: usize, id: &str) -> Result<(), String> {
+    if i.queue.at(part, index) == Some(id) { Ok(()) } else { Err("queue.badIndex".into()) }
 }
 
 #[tauri::command]
-pub fn player_queue_move(part: String, from: usize, to: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let part = Part::parse(&part).ok_or("queue.badPart")?;
-    if !state.player.inner().queue.move_item(part, from, to) {
-        return Err("queue.badIndex".into());
-    }
-    emit_queue(&app);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn player_queue_jump(part: String, index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub fn player_queue_remove(part: String, index: usize, id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let part = Part::parse(&part).ok_or("queue.badPart")?;
     let mut i = state.player.inner();
+    check_at(&i, part, index, &id)?;
+    if !i.queue.remove(part, index) {
+        return Err("queue.badIndex".into());
+    }
+    drop(i);
+    emit_queue(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn player_queue_move(part: String, from: usize, to: usize, id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let part = Part::parse(&part).ok_or("queue.badPart")?;
+    let mut i = state.player.inner();
+    check_at(&i, part, from, &id)?;
+    if !i.queue.move_item(part, from, to) {
+        return Err("queue.badIndex".into());
+    }
+    drop(i);
+    emit_queue(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn player_queue_jump(part: String, index: usize, id: String, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let part = Part::parse(&part).ok_or("queue.badPart")?;
+    let mut i = state.player.inner();
+    check_at(&i, part, index, &id)?;
     if i.queue.jump(part, index).is_none() {
         return Err("queue.badIndex".into());
     }
@@ -547,6 +559,12 @@ pub fn player_queue_jump(part: String, index: usize, app: AppHandle, state: Stat
     emit_state(&app, &i);
     emit_queue(&app);
     Ok(())
+}
+
+#[tauri::command]
+pub fn player_queue_clear(app: AppHandle, state: State<'_, AppState>) {
+    state.player.inner().queue.clear_up();
+    emit_queue(&app);
 }
 
 #[tauri::command]

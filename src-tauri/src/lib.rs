@@ -66,6 +66,7 @@ pub fn run() {
             commands::player::player_queue_remove,
             commands::player::player_queue_move,
             commands::player::player_queue_jump,
+            commands::player::player_queue_clear,
             commands::playlists::get_playlists,
             commands::playlists::get_playlist,
             commands::playlists::get_favorites,
