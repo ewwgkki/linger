@@ -1788,6 +1788,7 @@ dependencies = [
  "encoding_rs",
  "regex",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha1_smol",
  "tauri",

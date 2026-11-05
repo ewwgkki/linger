@@ -88,6 +88,8 @@ impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // safe under WAL; avoids an fsync per file on the first scan
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         Self::init(conn)
     }
     pub fn open_in_memory() -> Result<Db> {
@@ -182,6 +184,16 @@ impl Db {
     pub fn song(&self, id: &str) -> Result<Option<SongRow>> {
         let mut st = self.conn.prepare(&format!("{} WHERE s.id=?1", Self::SONG_SELECT))?;
         Ok(st.query_row([id], Self::map_song).optional()?)
+    }
+    pub fn song_count(&self) -> Result<usize> {
+        Ok(self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get::<_, i64>(0))? as usize)
+    }
+    /// Songs per root id (roots without songs are absent).
+    pub fn root_song_counts(&self) -> Result<HashMap<i64, usize>> {
+        let mut st = self.conn.prepare(
+            "SELECT f.root_id, count(*) FROM songs s JOIN files f ON f.id = s.file_id GROUP BY f.root_id")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as usize)))?;
+        Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
     }
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| r.get(0)).optional()?)
@@ -290,6 +302,23 @@ mod tests {
         assert_eq!(db.all_songs().unwrap().len(), 1);
         assert_eq!(db.setting("k").unwrap(), Some("v".into()));
         assert_eq!(db.roots().unwrap().len(), 1);
+    }
+    #[test] fn open_uses_wal_and_normal_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("lib.db")).unwrap();
+        let sync: i64 = db.conn.query_row("PRAGMA synchronous", [], |r| r.get(0)).unwrap();
+        assert_eq!(sync, 1); // NORMAL
+    }
+    #[test] fn song_counts() {
+        let mut db = Db::open_in_memory().unwrap();
+        let r = db.add_root("D:/m").unwrap();
+        let r2 = db.add_root("D:/n").unwrap();
+        let three: Vec<_> = (0..3).map(|i| song("D:/m", "a.flac", i * 1000, i as u32 + 1)).collect();
+        db.replace_file(r.id, &meta("a.flac"), &three).unwrap();
+        assert_eq!(db.song_count().unwrap(), 3);
+        let c = db.root_song_counts().unwrap();
+        assert_eq!(c.get(&r.id), Some(&3));
+        assert_eq!(c.get(&r2.id), None);
     }
     #[test] fn migration_failure_rolls_back() {
         let mut c = rusqlite::Connection::open_in_memory().unwrap();
