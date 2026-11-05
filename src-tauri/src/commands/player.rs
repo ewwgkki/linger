@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::db::{Db, Root, SongRow};
 use crate::player::decode::DecodeError;
 use crate::player::engine::{Engine, EngineEvent};
-use crate::player::queue::{Queue, Repeat};
+use crate::player::queue::{Part, Queue, Repeat};
 use crate::state::AppState;
 
 const SKIP_DELAY: Duration = Duration::from_millis(1200);
@@ -175,6 +175,27 @@ fn emit_state(app: &AppHandle, i: &Inner) {
     let _ = app.emit("player://state", dto(i));
 }
 
+/// The queue view changed (no payload; the UI re-fetches `player_queue`).
+fn emit_queue(app: &AppHandle) {
+    let _ = app.emit("player://queue", ());
+}
+
+/// How many upcoming source songs `player_queue` returns.
+pub const CTX_LIMIT: usize = 200;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QueueDto {
+    pub now: Option<String>,
+    pub up: Vec<String>,
+    pub ctx: Vec<String>,
+    pub ctx_total: usize,
+}
+
+fn queue_dto(i: &Inner) -> QueueDto {
+    let (ctx, ctx_total) = i.queue.upcoming(CTX_LIMIT);
+    QueueDto { now: i.id.clone(), up: i.queue.up_next().to_vec(), ctx, ctx_total }
+}
+
 fn save(state: &AppState, key: &str, value: &str) {
     if let Err(e) = state.db().set_setting(key, value) {
         eprintln!("linger: cannot save setting {key}: {e}");
@@ -257,6 +278,7 @@ fn fail(app: &AppHandle, i: &mut Inner, e: DecodeError) {
             i.playing = false;
         }
         emit_state(&app, &i);
+        emit_queue(&app);
     });
 }
 
@@ -337,7 +359,10 @@ fn handle_event(app: &AppHandle, epoch: u64, ev: EngineEvent) {
             let _ = app.emit("player://pos", PosEvent { pos });
             return;
         }
-        Effect::Load => load_current(app, &state, &mut i, true),
+        Effect::Load => {
+            load_current(app, &state, &mut i, true);
+            emit_queue(app);
+        }
         Effect::Stopped => {}
         Effect::Fail(e) => fail(app, &mut i, e),
         Effect::NoOutput => {
@@ -350,17 +375,22 @@ fn handle_event(app: &AppHandle, epoch: u64, ev: EngineEvent) {
 #[tauri::command]
 pub fn player_play_list(ids: Vec<String>, start: usize, shuffle: bool, app: AppHandle, state: State<'_, AppState>) {
     let mut i = state.player.inner();
+    play_list_locked(&app, &state, &mut i, ids, start, shuffle);
+}
+
+fn play_list_locked(app: &AppHandle, state: &AppState, i: &mut Inner, ids: Vec<String>, start: usize, shuffle: bool) {
     if ids.is_empty() {
         return;
     }
     let was = i.queue.shuffle();
     i.queue.play_list(ids, start, shuffle);
     if i.queue.shuffle() != was {
-        save(&state, "shuffle", "true");
+        save(state, "shuffle", "true");
     }
     i.failures = 0;
-    load_current(&app, &state, &mut i, true);
-    emit_state(&app, &i);
+    load_current(app, state, i, true);
+    emit_state(app, i);
+    emit_queue(app);
 }
 
 #[tauri::command]
@@ -391,6 +421,7 @@ pub fn player_next(app: AppHandle, state: State<'_, AppState>) {
     i.failures = 0;
     load_current(&app, &state, &mut i, true);
     emit_state(&app, &i);
+    emit_queue(&app);
 }
 
 #[tauri::command]
@@ -406,6 +437,7 @@ pub fn player_prev(app: AppHandle, state: State<'_, AppState>) {
         }
         i.failures = 0;
         load_current(&app, &state, &mut i, true);
+        emit_queue(&app);
     }
     emit_state(&app, &i);
 }
@@ -460,6 +492,63 @@ pub fn player_set_repeat(mode: String, app: AppHandle, state: State<'_, AppState
 }
 
 #[tauri::command]
+pub fn player_queue(state: State<'_, AppState>) -> QueueDto {
+    queue_dto(&state.player.inner())
+}
+
+#[tauri::command]
+pub fn player_queue_add(ids: Vec<String>, next: bool, app: AppHandle, state: State<'_, AppState>) {
+    if ids.is_empty() {
+        return;
+    }
+    let mut i = state.player.inner();
+    if i.id.is_none() {
+        play_list_locked(&app, &state, &mut i, ids, 0, false);
+        return;
+    }
+    if next {
+        i.queue.add_next(ids);
+    } else {
+        i.queue.add_last(ids);
+    }
+    emit_queue(&app);
+}
+
+#[tauri::command]
+pub fn player_queue_remove(part: String, index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let part = Part::parse(&part).ok_or("queue.badPart")?;
+    if !state.player.inner().queue.remove(part, index) {
+        return Err("queue.badIndex".into());
+    }
+    emit_queue(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn player_queue_move(part: String, from: usize, to: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let part = Part::parse(&part).ok_or("queue.badPart")?;
+    if !state.player.inner().queue.move_item(part, from, to) {
+        return Err("queue.badIndex".into());
+    }
+    emit_queue(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn player_queue_jump(part: String, index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let part = Part::parse(&part).ok_or("queue.badPart")?;
+    let mut i = state.player.inner();
+    if i.queue.jump(part, index).is_none() {
+        return Err("queue.badIndex".into());
+    }
+    i.failures = 0;
+    load_current(&app, &state, &mut i, true);
+    emit_state(&app, &i);
+    emit_queue(&app);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn player_state(state: State<'_, AppState>) -> PlayerStateDto {
     dto(&state.player.inner())
 }
@@ -485,6 +574,12 @@ mod tests {
         assert_eq!(on_error(2, 900), ErrorAction::SkipAfter(Duration::from_millis(1200)));
         assert_eq!(on_error(3, 900), ErrorAction::Stop);
         assert_eq!(on_error(4, 900), ErrorAction::Stop);
+    }
+
+    #[test]
+    fn queue_part_parses() {
+        assert_eq!(Part::parse("up"), Some(Part::Up));
+        assert_eq!(Part::parse("x"), None);
     }
 
     #[test]

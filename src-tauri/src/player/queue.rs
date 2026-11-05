@@ -25,7 +25,30 @@ impl Repeat {
     }
 }
 
+/// Which list of the queue view an operation targets.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    /// the user queue
+    Up,
+    /// the rest of the play source
+    Ctx,
+}
+
+impl Part {
+    pub fn parse(s: &str) -> Option<Part> {
+        match s {
+            "up" => Some(Part::Up),
+            "ctx" => Some(Part::Ctx),
+            _ => None,
+        }
+    }
+}
+
 pub struct Queue {
+    /// user queue, played before the rest of the source
+    up: Vec<String>,
+    /// the song playing right now came from the user queue
+    extra: Option<String>,
     items: Vec<String>,
     /// indices into `items` in playback order
     order: Vec<usize>,
@@ -40,7 +63,7 @@ impl Queue {
     pub fn new(seed: u64) -> Queue {
         // xorshift64* needs a non-zero state
         let rng = seed ^ 0x9E37_79B9_7F4A_7C15;
-        Queue { items: Vec::new(), order: Vec::new(), pos: 0, shuffle: false, repeat: Repeat::Off, rng: rng.max(1) }
+        Queue { up: Vec::new(), extra: None, items: Vec::new(), order: Vec::new(), pos: 0, shuffle: false, repeat: Repeat::Off, rng: rng.max(1) }
     }
 
     /// Like the web version: an empty list is ignored; `shuffle = true` turns shuffle on,
@@ -50,6 +73,7 @@ impl Queue {
             return;
         }
         let start = if start < items.len() { start } else { 0 };
+        self.extra = None;
         self.items = items;
         if shuffle {
             self.shuffle = true;
@@ -59,28 +83,44 @@ impl Queue {
     }
 
     pub fn current(&self) -> Option<&str> {
+        if let Some(x) = &self.extra {
+            return Some(x);
+        }
+        self.ctx_current()
+    }
+
+    fn ctx_current(&self) -> Option<&str> {
         self.order.get(self.pos).and_then(|&i| self.items.get(i)).map(String::as_str)
     }
 
     /// `auto`: the previous song ended by itself (vs. the user pressing next).
     pub fn next(&mut self, auto: bool) -> Option<&str> {
+        if auto && self.repeat == Repeat::One && self.current().is_some() {
+            return self.current();
+        }
+        if !self.up.is_empty() {
+            self.extra = Some(self.up.remove(0));
+            return self.current();
+        }
         if self.items.is_empty() {
             return None;
         }
-        if !(auto && self.repeat == Repeat::One) {
-            if self.pos + 1 < self.order.len() {
-                self.pos += 1;
-            } else if self.repeat == Repeat::All || !auto {
-                self.pos = 0;
-            } else {
-                return None;
-            }
+        if self.pos + 1 < self.order.len() {
+            self.pos += 1;
+        } else if self.repeat == Repeat::All || !auto {
+            self.pos = 0;
+        } else {
+            return None; // an extra song stays current
         }
+        self.extra = None;
         self.current()
     }
 
     /// Previous song, or the current one again when already at the first.
     pub fn prev(&mut self) -> Option<&str> {
+        if self.extra.take().is_some() {
+            return self.current();
+        }
         if self.pos > 0 {
             self.pos -= 1;
         }
@@ -101,6 +141,97 @@ impl Queue {
 
     pub fn set_repeat(&mut self, r: Repeat) {
         self.repeat = r;
+    }
+
+    pub fn add_next(&mut self, ids: Vec<String>) {
+        self.up.splice(0..0, ids);
+    }
+
+    pub fn add_last(&mut self, ids: Vec<String>) {
+        self.up.extend(ids);
+    }
+
+    pub fn up_next(&self) -> &[String] {
+        &self.up
+    }
+
+    /// The rest of the source after the current position: first `limit` songs and the total.
+    pub fn upcoming(&self, limit: usize) -> (Vec<String>, usize) {
+        let rest = self.order.get(self.pos + 1..).unwrap_or(&[]);
+        let v = rest.iter().take(limit).filter_map(|&i| self.items.get(i).cloned()).collect();
+        (v, rest.len())
+    }
+
+    fn ctx_len(&self) -> usize {
+        self.order.len().saturating_sub(self.pos + 1)
+    }
+
+    pub fn remove(&mut self, part: Part, index: usize) -> bool {
+        match part {
+            Part::Up => {
+                if index >= self.up.len() {
+                    return false;
+                }
+                self.up.remove(index);
+            }
+            Part::Ctx => {
+                if index >= self.ctx_len() {
+                    return false;
+                }
+                let item = self.order.remove(self.pos + 1 + index);
+                self.items.remove(item);
+                for o in &mut self.order {
+                    if *o > item {
+                        *o -= 1;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Moves the entry at `from` so it ends up at `to` (indices within the part).
+    pub fn move_item(&mut self, part: Part, from: usize, to: usize) -> bool {
+        match part {
+            Part::Up => {
+                if from >= self.up.len() || to >= self.up.len() {
+                    return false;
+                }
+                let x = self.up.remove(from);
+                self.up.insert(to, x);
+            }
+            Part::Ctx => {
+                let n = self.ctx_len();
+                if from >= n || to >= n {
+                    return false;
+                }
+                let base = self.pos + 1;
+                let x = self.order.remove(base + from);
+                self.order.insert(base + to, x);
+            }
+        }
+        true
+    }
+
+    /// Makes entry `index` of the part the current song.
+    pub fn jump(&mut self, part: Part, index: usize) -> Option<&str> {
+        match part {
+            Part::Up => {
+                if index >= self.up.len() {
+                    return None;
+                }
+                self.up.drain(..index);
+                self.extra = Some(self.up.remove(0));
+            }
+            Part::Ctx => {
+                if index >= self.ctx_len() {
+                    return None;
+                }
+                self.extra = None;
+                self.pos += index + 1;
+            }
+        }
+        self.current()
     }
 
     fn build_order(&mut self, start: usize) {
@@ -279,5 +410,128 @@ mod tests {
             assert_eq!(Repeat::parse(r.as_str()), Some(r));
         }
         assert_eq!(Repeat::parse("x"), None);
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn user_queue_plays_before_context() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 0, false);
+        q.add_last(s(&["x"]));
+        q.add_next(s(&["y", "z"]));
+        assert_eq!(q.up_next(), ["y", "z", "x"]);
+        assert_eq!(q.next(false), Some("y"));
+        assert_eq!(q.next(false), Some("z"));
+        assert_eq!(q.next(false), Some("x"));
+        assert_eq!(q.next(false), Some("b"));
+    }
+
+    #[test]
+    fn prev_from_user_queue_returns_context_song() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 0, false);
+        q.add_next(s(&["x"]));
+        assert_eq!(q.next(false), Some("x"));
+        assert_eq!(q.prev(), Some("a"));
+    }
+
+    #[test]
+    fn repeat_one_replays_user_queue_song() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 0, false);
+        q.set_repeat(Repeat::One);
+        q.add_next(s(&["x"]));
+        assert_eq!(q.next(false), Some("x"));
+        assert_eq!(q.next(true), Some("x"));
+        assert_eq!(q.next(false), Some("b"));
+    }
+
+    #[test]
+    fn play_list_keeps_user_queue() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 0, false);
+        q.add_next(s(&["x"]));
+        q.play_list(s(&["d", "e"]), 0, false);
+        assert_eq!(q.current(), Some("d"));
+        assert_eq!(q.up_next(), ["x"]);
+    }
+
+    #[test]
+    fn upcoming_limit_and_total() {
+        let mut q = Queue::new(1);
+        let many: Vec<String> = (0..1000).map(|i| format!("s{i}")).collect();
+        q.play_list(many, 0, false);
+        let (v, total) = q.upcoming(200);
+        assert_eq!(v.len(), 200);
+        assert_eq!(v[0], "s1");
+        assert_eq!(total, 999);
+    }
+
+    #[test]
+    fn remove_ctx_survives_shuffle_toggle() {
+        let mut q = Queue::new(1);
+        q.play_list(items(4), 0, false);
+        assert!(q.remove(Part::Ctx, 1));
+        assert_eq!(q.upcoming(10).0, ["b", "d"]);
+        q.set_shuffle(true);
+        q.set_shuffle(false);
+        let (v, total) = q.upcoming(10);
+        assert!(!v.contains(&"c".to_string()));
+        assert_eq!((v.len(), total), (2, 2));
+        assert_eq!(q.len(), 3);
+    }
+
+    #[test]
+    fn ops_target_visible_order_with_shuffle() {
+        let mut q = Queue::new(9);
+        q.play_list(items(10), 0, true);
+        let v = q.upcoming(10).0;
+        assert!(q.remove(Part::Ctx, 2));
+        let mut e = v.clone();
+        e.remove(2);
+        assert_eq!(q.upcoming(10).0, e);
+        assert!(q.move_item(Part::Ctx, 0, 3));
+        let first = e.remove(0);
+        e.insert(3, first);
+        assert_eq!(q.upcoming(10).0, e);
+        assert_eq!(q.jump(Part::Ctx, 1), Some(e[1].as_str()));
+        assert_eq!(q.current(), Some(e[1].as_str()));
+    }
+
+    #[test]
+    fn jump_up_drops_skipped() {
+        let mut q = Queue::new(1);
+        q.play_list(items(2), 0, false);
+        q.add_last(s(&["x", "y", "z"]));
+        assert_eq!(q.jump(Part::Up, 1), Some("y"));
+        assert_eq!(q.current(), Some("y"));
+        assert_eq!(q.up_next(), ["z"]);
+    }
+
+    #[test]
+    fn bad_indices_are_noops() {
+        let mut q = Queue::new(1);
+        q.play_list(items(3), 0, false);
+        q.add_last(s(&["x"]));
+        assert!(!q.remove(Part::Ctx, 2));
+        assert!(!q.remove(Part::Up, 1));
+        assert!(!q.move_item(Part::Ctx, 0, 2));
+        assert!(!q.move_item(Part::Up, 1, 0));
+        assert_eq!(q.jump(Part::Ctx, 2), None);
+        assert_eq!(q.jump(Part::Up, 1), None);
+        assert_eq!(q.current(), Some("a"));
+        assert_eq!(q.up_next(), ["x"]);
+        assert_eq!(q.upcoming(10).0, ["b", "c"]);
+        assert_eq!(q.len(), 3);
+    }
+
+    #[test]
+    fn part_parses() {
+        assert_eq!(Part::parse("up"), Some(Part::Up));
+        assert_eq!(Part::parse("ctx"), Some(Part::Ctx));
+        assert_eq!(Part::parse("x"), None);
     }
 }
