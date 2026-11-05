@@ -28,7 +28,13 @@ pub fn source_image(root_path: &Path, song: &SongRow) -> Option<(Vec<u8>, PathBu
 
 /// Decodes `bytes` and shrinks the long side to `max` (never enlarges); JPEG quality 85.
 pub fn thumbnail(bytes: &[u8], max: u32) -> Option<Vec<u8>> {
-    let img = image::load_from_memory(bytes).ok()?;
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16384);
+    limits.max_image_height = Some(16384);
+    limits.max_alloc = Some(128 * 1024 * 1024);
+    reader.limits(limits);
+    let img = reader.decode().ok()?;
     let img = if img.width().max(img.height()) > max {
         img.resize(max, max, image::imageops::FilterType::CatmullRom)
     } else { img };
@@ -41,30 +47,34 @@ pub fn thumbnail(bytes: &[u8], max: u32) -> Option<Vec<u8>> {
 
 /// Cached thumbnail `covers/{file_id}.jpg`; reused when at least as new as the source image.
 pub fn cached_cover(data_dir: &Path, root_path: &Path, song: &SongRow) -> Option<Vec<u8>> {
+    if !matches!(song.cover, 1 | 2) { return None; }
     let cache = data_dir.join("covers").join(format!("{}.jpg", song.file_id));
-    let (src_bytes, src_path) = match song.cover {
-        1 | 2 => {
-            // cheap freshness check before decoding anything
-            let src_path = match song.cover {
-                1 => song_file(root_path, song),
-                _ => crate::scan::dir_cover(song_file(root_path, song).parent()?)?,
-            };
-            let smt = std::fs::metadata(&src_path).and_then(|m| m.modified()).ok();
-            let cmt = std::fs::metadata(&cache).and_then(|m| m.modified()).ok();
-            if let (Some(s), Some(c)) = (smt, cmt) {
-                if c >= s {
-                    if let Ok(b) = std::fs::read(&cache) { return Some(b); }
-                }
-            }
-            let (b, p) = source_image(root_path, song)?;
-            (b, p)
-        }
-        _ => return None,
+    // cheap freshness check before decoding anything
+    let src_path = if song.cover == 1 {
+        song_file(root_path, song)
+    } else {
+        crate::scan::dir_cover(song_file(root_path, song).parent()?)?
     };
-    let _ = src_path;
+    let smt = std::fs::metadata(&src_path).and_then(|m| m.modified()).ok();
+    let cmt = std::fs::metadata(&cache).and_then(|m| m.modified()).ok();
+    if let (Some(s), Some(c)) = (smt, cmt) {
+        if c >= s {
+            if let Ok(b) = std::fs::read(&cache) { return Some(b); }
+        }
+    }
+    let (src_bytes, _) = source_image(root_path, song)?;
     let jpg = thumbnail(&src_bytes, THUMB_MAX)?;
-    if std::fs::create_dir_all(data_dir.join("covers")).is_ok() {
-        let _ = std::fs::write(&cache, &jpg);
+    let dir = data_dir.join("covers");
+    if std::fs::create_dir_all(&dir).is_ok() {
+        // atomic publish: unique temp file, then rename over the final path
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = dir.join(format!("{}.jpg.{}-{}.tmp", song.file_id, std::process::id(), n));
+        if std::fs::write(&tmp, &jpg).is_ok() {
+            if std::fs::rename(&tmp, &cache).is_err() { let _ = std::fs::remove_file(&tmp); }
+        } else {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
     Some(jpg)
 }
@@ -134,5 +144,33 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let data = tempfile::tempdir().unwrap();
         assert!(cached_cover(data.path(), root.path(), &song(0)).is_none());
+    }
+
+    #[test] fn concurrent_cache_writes_are_valid_and_leave_no_tmp() {
+        let root = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("a")).unwrap();
+        std::fs::write(root.path().join("a").join("cover.png"), png(1200, 1200)).unwrap();
+        let s = song(2);
+        std::thread::scope(|sc| {
+            for _ in 0..8 {
+                sc.spawn(|| for _ in 0..5 {
+                    let b = cached_cover(data.path(), root.path(), &s).unwrap();
+                    assert_eq!(dims(&b), (360, 360));
+                });
+            }
+        });
+        let left: Vec<_> = std::fs::read_dir(data.path().join("covers")).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).collect();
+        assert!(left.is_empty());
+    }
+    #[test] fn decompression_bomb_header_returns_none() {
+        let mut v = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, b'I', b'H', b'D', b'R'];
+        v.extend_from_slice(&100000u32.to_be_bytes());
+        v.extend_from_slice(&100000u32.to_be_bytes());
+        v.extend_from_slice(&[8, 2, 0, 0, 0, 0, 0, 0, 0]);
+        let t = std::time::Instant::now();
+        assert!(thumbnail(&v, 360).is_none());
+        assert!(t.elapsed().as_secs() < 2);
     }
 }
