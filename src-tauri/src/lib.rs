@@ -79,6 +79,7 @@ pub fn run() {
             commands::playlists::get_saved,
             commands::playlists::get_memberships,
             commands::playlists::save_songs,
+            commands::import::import_spotify,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Linger");

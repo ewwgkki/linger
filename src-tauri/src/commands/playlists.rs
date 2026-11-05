@@ -28,7 +28,7 @@ pub struct MembershipDto { pub total: usize, pub fav: usize, pub lists: Vec<(i64
 pub struct SaveDto { pub added: usize, pub duplicate: usize, pub removed: usize }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct PlaylistsChanged { pub id: Option<i64>, pub favorites: bool }
+pub(crate) struct PlaylistsChanged { pub id: Option<i64>, pub favorites: bool }
 
 fn err(e: DbError) -> String {
     match e {
