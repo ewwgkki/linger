@@ -3,7 +3,7 @@ name = "linger"
 version = "0.1.0"
 description = "Linger · 余音 — an ad-free local music player"
 authors = ["ewwgkki"]
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 edition = "2021"
 
 [lib]

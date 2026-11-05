@@ -32,4 +32,4 @@ cargo tauri build    # build the NSIS installer
 
 ## License / 许可证
 
-[GPL-3.0](LICENSE)
+GPL-3.0-or-later — see [LICENSE](LICENSE) / 见 [LICENSE](LICENSE)
