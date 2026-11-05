@@ -46,7 +46,7 @@ fn basename(p: &str) -> &str {
 /// `^(.+?)\s+-\s+(.+)$` split into trimmed (left, right).
 fn split_dash(s: &str) -> Option<(String, String)> {
     static R: OnceLock<Regex> = OnceLock::new();
-    re(&R, r"^(.+?)[ \t\n\x0B\f\r]+-[ \t\n\x0B\f\r]+(.+)$")
+    re(&R, r"^(.+?)\s+-\s+(.+)$")
         .captures(s)
         .map(|m| (php_trim(&m[1]).to_string(), php_trim(&m[2]).to_string()))
 }
@@ -57,7 +57,7 @@ pub fn folder_artist_album(folder: &str) -> (String, String) {
     if let Some(r) = split_dash(folder) {
         return r;
     }
-    if let Some(m) = re(&R, r"^(?:[0-9]+_)?([^《]+)《(.+?)》").captures(folder) {
+    if let Some(m) = re(&R, r"^(?:\d+_)?([^《]+)《(.+?)》").captures(folder) {
         return (php_trim(&m[1]).to_string(), php_trim(&m[2]).to_string());
     }
     (String::new(), String::new())
@@ -76,18 +76,18 @@ pub fn derive(rel: &str, tag: &RawTags, duration: f64) -> Derived {
 
     let mut track = tag.track;
     if track == 0 {
-        if let Some(m) = re(&NUM, r"^([0-9]{1,3})[ \t\n\x0B\f\r._-]+").captures(&base) {
+        if let Some(m) = re(&NUM, r"^(\d{1,3})[\s._-]+").captures(&base) {
             track = m[1].parse().unwrap_or(0);
         }
     }
-    let plain = re(&NUM, r"^([0-9]{1,3})[ \t\n\x0B\f\r._-]+").replace(&base, "").into_owned();
+    let plain = re(&NUM, r"^(\d{1,3})[\s._-]+").replace(&base, "").into_owned();
 
     let (mut fa, mut ft) = split_dash(&plain).unwrap_or_default();
     if is_unknown(&fa) { fa.clear(); }
     if is_unknown(&ft) { ft.clear(); }
 
     let tt0 = clean_tag(&tag.title);
-    let tt = re(&TNUM, r"^[0-9]{1,3}[ \t\n\x0B\f\r.]+").replace(&tt0, "").into_owned();
+    let tt = re(&TNUM, r"^\d{1,3}[\s.]+").replace(&tt0, "").into_owned();
     let ta = or(clean_tag(&tag.artist), clean_tag(&tag.albumartist));
     let tb = clean_tag(&tag.album);
 
@@ -141,6 +141,15 @@ mod tests {
         assert_eq!(d("281公里.mp3", "", "", "", 269.0), s4("281公里", "", "", 0));
         assert_eq!(d("x.mp3", "晴天", "晴天 周杰伦", "晴天", 200.0), s4("晴天", "", "", 0));
         assert_eq!(d("a.mp3", "Track 01", "未知艺术家", "www.abc.com", 200.0), s4("a", "", "", 0));
+    }
+    #[test]
+    fn unicode_whitespace_and_digits() {
+        // expected values from running the PHP derive()
+        assert_eq!(d("歌手\u{3000}-\u{3000}歌名.mp3", "", "", "", 200.0), s4("歌名", "歌手", "", 0));
+        assert_eq!(d("01\u{3000}晴天.mp3", "", "", "", 200.0), s4("晴天", "", "", 1));
+        assert_eq!(d("０１ 晴天.mp3", "", "", "", 200.0), s4("晴天", "", "", 0));
+        assert_eq!(d("专辑\u{3000}-\u{3000}x/０１ 晴天.mp3", "", "", "", 200.0), s4("晴天", "专辑", "x", 0));
+        assert_eq!(d("a.mp3", "３ 标题", "", "", 200.0), s4("标题", "", "", 0));
     }
     #[test]
     fn folder_cases() {
