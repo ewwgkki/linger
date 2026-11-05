@@ -29,6 +29,7 @@
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
   <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M10.8 10.6 12.6 9.4V15" stroke-width="2"/></symbol>
   <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M2 2l20 20M5.8 5.8A7 7 0 0 0 7 19h9.5M21 15.5A4.5 4.5 0 0 0 17.5 10H16a7 7 0 0 0-6.4-4.9"/></symbol>
 </svg>
 
@@ -88,7 +89,7 @@
         <button class="tbtn minor" id="prev" type="button" data-i18n-title="player.prev" data-i18n-aria-label="player.prev"><svg class="i f"><use href="#i-prev"/></svg></button>
         <button class="tbtn big" id="playpause" type="button" data-i18n-title="player.playPause" data-i18n-aria-label="player.play"><svg class="i f"><use href="#i-play" id="ppicon"/></svg></button>
         <button class="tbtn" id="next" type="button" data-i18n-title="player.next" data-i18n-aria-label="player.next"><svg class="i f"><use href="#i-next"/></svg></button>
-        <button class="tbtn minor" id="repeat" type="button" aria-pressed="false" data-i18n-title="player.repeatOff" data-i18n-aria-label="player.repeatOff"><svg class="i"><use href="#i-repeat"/></svg></button>
+        <button class="tbtn minor" id="repeat" type="button" aria-pressed="false" data-i18n-title="player.repeatOff" data-i18n-aria-label="player.repeatOff"><svg class="i"><use href="#i-repeat" id="repicon"/></svg></button>
       </div>
       <div class="seek"><span id="tcur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" data-i18n-aria-label="player.seek"><span id="tdur">0:00</span></div>
     </div>
@@ -120,7 +121,7 @@
         <p class="hint" id="scaninfo"></p>
         <div class="progress" id="scanprog" hidden><i></i></div>
         <p class="hint" id="scanmsg" aria-live="polite"></p>
-        <ul class="skips" id="skips" hidden></ul>
+        <details class="help" id="skipbox" hidden><summary id="skipsum"></summary><ul class="skips" id="skips"></ul></details>
         <div class="row">
           <button class="btn dark" type="button" id="scanbtn"><svg class="i"><use href="#i-refresh"/></svg><span data-i18n="settings.startScan"></span></button>
         </div>

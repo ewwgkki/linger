@@ -86,3 +86,15 @@ test('index.html text comes from i18n', () => {
   const body = html.slice(html.indexOf('<body'));
   assert.ok(!/[　-鿿＀-￯]/.test(body), 'CJK in index.html body');
 });
+
+test('every literal t() key used in ui/js exists', () => {
+  const keys = new Set(Object.keys(load('en')));
+  let n = 0;
+  for (const f of walk(join(ui, 'js'))) {
+    for (const m of readFileSync(f, 'utf8').matchAll(/\bt\('([\w.]+\w)'/g)) {
+      n++;
+      assert.ok(keys.has(m[1]), `${f}: missing key ${m[1]}`);
+    }
+  }
+  assert.ok(n > 50, `found ${n} uses`);
+});

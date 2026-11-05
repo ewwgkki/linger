@@ -5,6 +5,8 @@ import { esc, playable, icon } from './util.js';
 import { info } from './library.js';
 import { renderSongs, QUALITIES, qLabel, rootLabel, fullPath, rowHeight } from './views/songs.js';
 import { renderShelf } from './views/shelf.js';
+import { initPlayer, playList, markRows, libraryChanged } from './player.js';
+import { initSettings, openSettings } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -13,7 +15,7 @@ const store = {
 };
 
 const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count' };
-/** Shared with views and (Task 11) the player / settings modules. */
+/** Shared with views and the player / settings modules. */
 export const ctx = {
   state,
   lib: { roots: [], songs: [], scanned_at: null, ffmpeg: false },
@@ -22,13 +24,20 @@ export const ctx = {
   /** Songs currently shown on the songs page, in display order. */
   list: [],
   view: null,
+  /** True once the first get_library has returned. */
+  loaded: false,
   render: () => render(),
+  sidebar: () => sidebar(),
   /** Plays `list` (already filtered to playable songs) from `start`. */
-  playList(list, start, shuffle) {
-    if (!list.length) return;
-    api.invoke('player_play_list', { ids: list.map((s) => s.id), start: Math.max(0, start), shuffle });
+  playList: (list, start, shuffle) => playList(list, start, shuffle),
+  openSettings: () => { closeDrawer(); openSettings(); },
+  /** Goes back to the songs page with the given filters (where a queue was started). */
+  showSource(c) {
+    try { history.pushState({ artist: c.artist, album: c.album, sort: c.sort, tab: 'songs' }, '', location.pathname); } catch (_) { /* ignore */ }
+    Object.assign(state, { tab: 'songs', artist: c.artist, album: c.album, sort: { ...c.sort }, quality: c.quality, root: c.root, q: c.q, open: null });
+    $('q').value = c.q;
+    render();
   },
-  openSettings: () => { const d = $('settings'); closeDrawer(); if (!d.open) d.showModal(); },
 };
 
 // Covers that fail to load fall back to the symbol icon underneath (no inline handlers under the CSP).
@@ -39,9 +48,11 @@ async function loadLibrary() {
   const lib = await api.invoke('get_library');
   ctx.lib = { roots: lib.roots || [], songs: lib.songs || [], scanned_at: lib.scanned_at, ffmpeg: !!lib.ffmpeg };
   ctx.caps = { ffmpeg: !!lib.ffmpeg };
+  ctx.loaded = true;
   if (state.root != null && !ctx.lib.roots.some((r) => r.id === state.root)) state.root = null;
   sidebar();
   render();
+  libraryChanged();
 }
 
 function sidebar() {
@@ -94,6 +105,7 @@ function render() {
   if (state.tab === 'songs') {
     ctx.view = renderSongs($('view'), ctx);
     ctx.list = ctx.view.list;
+    markRows();
   } else {
     renderShelf($('view'), ctx, state.tab);
     ctx.view = null;
@@ -190,12 +202,7 @@ window.addEventListener('scroll', () => $('topbar').classList.toggle('scrolled',
 // Row height changes at the narrow breakpoint.
 matchMedia('(max-width:760px)').addEventListener('change', () => { if (ctx.view) ctx.view.refresh(); });
 
-// ---------- top bar actions (Task 11 adds progress UI and the settings dialog) ----------
-$('refresh').onclick = () => {
-  if (!ctx.lib.roots.length) { ctx.openSettings(); return; }
-  $('refresh').disabled = true; $('refresh').classList.add('spin');
-  api.invoke('start_scan');
-};
+// ---------- top bar actions (the refresh button is wired in settings.js) ----------
 $('opensettings').onclick = () => ctx.openSettings();
 
 function tabFromHash() { const h = location.hash.slice(1); return ['songs', 'artists', 'albums'].includes(h) ? h : 'songs'; }
@@ -208,17 +215,16 @@ async function boot() {
   applyI18n();
   state.shelfSort = store.get('shelfSort', 'count');
   state.tab = tabFromHash();
-  api.listen('library://roots', (roots) => { ctx.lib.roots = roots; sidebar(); });
-  api.listen('scan://finished', () => {
-    $('refresh').disabled = false; $('refresh').classList.remove('spin');
-    loadLibrary();
-  });
+  initSettings(ctx, { loadLibrary });
   try {
     await loadLibrary();
   } catch (e) {
     $('view').innerHTML = `<div class="empty">${icon('disc')}<h2>${esc(t('error.loadTitle'))}</h2><p>${esc(String(e && e.message || e))}</p></div>`;
     return;
   }
+  await initPlayer(ctx);
+  // first start: nothing to show until a folder is added
+  if (!ctx.lib.roots.length) ctx.openSettings();
 }
 
 export const ready = boot();

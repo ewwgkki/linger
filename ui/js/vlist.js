@@ -96,7 +96,10 @@ export function mountVList(container, opts) {
       o = { ...o, ...next };
       layout(true);
     },
-    /** Window-relative scroll so row `i` is visible: align 'center' | 'start' | 'nearest'. */
+    /**
+     * Window-relative scroll so row `i` is visible: align 'center' | 'start' | 'nearest', or
+     * 'reveal' (centre it, but only when it is not already fully visible).
+     */
     scrollToIndex(i, align = 'nearest', behavior = 'auto') {
       if (i < 0 || i >= o.count) return;
       const y = origin() + topOf(i, o.rowH, o.expanded);
@@ -105,6 +108,8 @@ export function mountVList(container, opts) {
       const player = document.getElementById('player');
       const foot = innerHeight - (player && !player.hidden ? player.offsetHeight : 0);
       let delta;
+      if (align === 'reveal') align = y < head || y + h > foot ? 'center' : 'none';
+      if (align === 'none') return;
       if (align === 'start') delta = y - head;
       else if (align === 'center') delta = y - (head + foot) / 2 + h / 2;
       else if (y < head) delta = y - head;

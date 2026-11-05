@@ -117,5 +117,36 @@
   "settings.scan": "扫描",
   "settings.startScan": "更新曲库",
   "settings.scanHint": "第一次扫描要读取每首歌的信息，歌多时需要几分钟；以后只处理新增或改动过的文件，很快。",
-  "settings.ffmpeg": "FFmpeg"
+  "settings.ffmpeg": "FFmpeg",
+
+  "player.error": "「{title}」无法播放",
+  "player.errorReason": "{error}：{reason}",
+
+  "settings.noRoots": "还没有添加音乐文件夹。点下面的按钮选择一个（可以一次选多个）。",
+  "settings.remove": "移除",
+  "settings.online": "✓ 可以访问 · {n} 首",
+  "settings.offline": "✗ 无法访问 · {n} 首（歌曲会保留，恢复后点“更新曲库”）",
+  "settings.added": "已添加 {n} 个文件夹，正在扫描…",
+  "settings.alreadyAdded": "这些文件夹已经添加过了。",
+  "settings.removed": "已移除。",
+  "settings.addError": "操作失败：{msg}",
+  "settings.promptPath": "音乐文件夹路径",
+  "settings.ffmpegFound": "已找到 FFmpeg，WMA 和 APE 格式的歌可以正常播放。",
+  "settings.ffmpegMissing": "没有找到 FFmpeg，WMA 和 APE 格式的歌暂时不能播放（会灰显并自动跳过）。把 ffmpeg.exe 放到余音程序所在的文件夹，或安装 FFmpeg 并加入 PATH，然后重启余音。",
+
+  "scan.finding": "正在查找音乐文件…",
+  "scan.progress": "正在更新曲库 {done} / {total}",
+  "scan.done": "曲库已更新：共 {n} 首，{change}。",
+  "scan.doneCount": "曲库已更新：共 {n} 首。",
+  "scan.added": "新增 {n} 首",
+  "scan.removed": "移除 {n} 首",
+  "scan.noChange": "没有变化",
+  "scan.skippedTitle": "跳过了 {n} 个文件",
+  "scan.withSkipped": "{msg}有 {n} 个文件被跳过。",
+  "scan.view": "查看",
+  "scan.openSettings": "打开设置",
+  "scan.error": "扫描出错：{msg}",
+  "scan.stalled": "扫描很久没有动静，可能已经中断。可以再点一次“更新曲库”。",
+  "scan.lastInfo": "上次扫描：{time}，共 {n} 首。",
+  "scan.never": "还没有扫描过。"
 }

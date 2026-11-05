@@ -286,3 +286,8 @@ details.help .hint{margin-top:8px}
 .sorts{min-width:0;max-width:100%}
 .sorts .seg{min-width:0;overflow-x:auto;scrollbar-width:none}
 .sorts .seg button{flex:none}
+.prow .rp{font-family:var(--mono);font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;direction:ltr}
+.prow.off>svg.i{color:var(--danger)}
+#ffmpeginfo.warn{color:var(--danger)}
+#skipbox .skips{margin-top:8px;max-height:220px}
+#repeat[aria-pressed="false"]{color:var(--faint)}

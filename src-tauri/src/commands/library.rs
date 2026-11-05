@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -160,7 +160,7 @@ pub fn remove_root(id: i64, state: State<'_, AppState>) -> Result<Vec<RootDto>, 
     roots_dto(&db, &online).map_err(err)
 }
 
-/// Starts a background probe + incremental scan; ignored while one is running.
+/// Starts a background probe + incremental scan; during a running scan, queues one more pass.
 #[tauri::command]
 pub fn start_scan(app: AppHandle) {
     spawn_scan(app);
@@ -178,15 +178,70 @@ pub fn probe_roots(roots: &[Root]) -> HashSet<i64> {
     handles.into_iter().filter_map(|h| h.join().ok()).filter(|(_, ok)| *ok).map(|(id, _)| id).collect()
 }
 
-struct ScanningGuard<'a>(&'a AppState);
-impl Drop for ScanningGuard<'_> {
-    fn drop(&mut self) {
-        self.0.scanning.store(false, Ordering::SeqCst);
+/// One scan thread at a time. A request made while a scan runs queues exactly one more pass,
+/// so a folder added mid-scan (or during the startup probe) is still scanned.
+#[derive(Debug, Default)]
+pub struct ScanGate {
+    running: AtomicBool,
+    again: AtomicBool,
+}
+
+impl ScanGate {
+    /// Returns true when the caller must start a scan thread.
+    pub fn request(&self) -> bool {
+        if self.running.swap(true, Ordering::SeqCst) {
+            self.again.store(true, Ordering::SeqCst);
+            false
+        } else {
+            true
+        }
+    }
+    /// Called by the scan thread after each pass; true means run another pass.
+    pub fn finish(&self) -> bool {
+        if self.again.swap(false, Ordering::SeqCst) {
+            return true;
+        }
+        self.running.store(false, Ordering::SeqCst);
+        // a request that arrived between the check and the store
+        self.again.swap(false, Ordering::SeqCst) && !self.running.swap(true, Ordering::SeqCst)
+    }
+    /// The scan thread could not start or panicked.
+    pub fn abort(&self) {
+        self.again.store(false, Ordering::SeqCst);
+        self.running.store(false, Ordering::SeqCst);
+    }
+    pub fn running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 }
 
+/// Releases the gate if the scan thread panics (normal exits go through `finish`).
+struct PanicGuard<'a>(&'a AppState);
+impl Drop for PanicGuard<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.scan.abort();
+        }
+    }
+}
+
+fn scan_pass(app: &AppHandle, state: &AppState) {
+    let roots = state.db().roots().unwrap_or_default();
+    let online = probe_roots(&roots);
+    state.set_online(online.clone());
+    if let Ok(dto) = roots_dto(&state.db(), &online) {
+        let _ = app.emit("library://roots", dto);
+    }
+    let rep = scan_shared(&state.db, &roots, &online, &mut |p| {
+        let _ = app.emit("scan://progress", p);
+    });
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let _ = state.db().set_setting("scanned_at", &now.to_string());
+    let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped });
+}
+
 pub fn spawn_scan(app: AppHandle) {
-    if app.state::<AppState>().scanning.swap(true, Ordering::SeqCst) {
+    if !app.state::<AppState>().scan.request() {
         return;
     }
     let app2 = app.clone();
@@ -195,22 +250,16 @@ pub fn spawn_scan(app: AppHandle) {
         .spawn(move || {
             let app = app2;
             let state = app.state::<AppState>();
-            let _guard = ScanningGuard(&state);
-            let roots = state.db().roots().unwrap_or_default();
-            let online = probe_roots(&roots);
-            state.set_online(online.clone());
-            if let Ok(dto) = roots_dto(&state.db(), &online) {
-                let _ = app.emit("library://roots", dto);
+            let _guard = PanicGuard(&state);
+            loop {
+                scan_pass(&app, &state);
+                if !state.scan.finish() {
+                    break;
+                }
             }
-            let rep = scan_shared(&state.db, &roots, &online, &mut |p| {
-                let _ = app.emit("scan://progress", p);
-            });
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-            let _ = state.db().set_setting("scanned_at", &now.to_string());
-            let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped });
         });
     if spawned.is_err() {
-        app.state::<AppState>().scanning.store(false, Ordering::SeqCst);
+        app.state::<AppState>().scan.abort();
     }
 }
 
@@ -218,6 +267,21 @@ pub fn spawn_scan(app: AppHandle) {
 mod tests {
     use super::*;
     use crate::db::{song_id, FileMeta, NewSong};
+
+    #[test]
+    fn scan_gate_queues_one_more_pass() {
+        let g = ScanGate::default();
+        assert!(g.request(), "first request starts a thread");
+        assert!(!g.request(), "second request is queued");
+        assert!(!g.request(), "requests coalesce");
+        assert!(g.finish(), "queued request runs another pass");
+        assert!(!g.finish(), "then the thread stops");
+        assert!(!g.running());
+        assert!(g.request(), "idle again: a new request starts a thread");
+        g.abort();
+        assert!(!g.running());
+        assert!(g.request());
+    }
 
     #[test]
     fn normalize_root_cases() {

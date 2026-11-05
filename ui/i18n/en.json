@@ -117,5 +117,36 @@
   "settings.scan": "Scan",
   "settings.startScan": "Update library",
   "settings.scanHint": "The first scan reads every song and can take a few minutes for a large library; later scans only touch new or changed files and are quick.",
-  "settings.ffmpeg": "FFmpeg"
+  "settings.ffmpeg": "FFmpeg",
+
+  "player.error": "Couldn't play “{title}”",
+  "player.errorReason": "{error}: {reason}",
+
+  "settings.noRoots": "No music folders yet. Use the button below to pick one (you can select several).",
+  "settings.remove": "Remove",
+  "settings.online": "✓ reachable · {n} songs",
+  "settings.offline": "✗ unreachable · {n} songs (kept; click “Update library” once it is back)",
+  "settings.added": "Added {n} folder(s), scanning…",
+  "settings.alreadyAdded": "These folders were already added.",
+  "settings.removed": "Removed.",
+  "settings.addError": "Failed: {msg}",
+  "settings.promptPath": "Music folder path",
+  "settings.ffmpegFound": "FFmpeg found: WMA and APE songs can be played.",
+  "settings.ffmpegMissing": "FFmpeg not found, so WMA and APE songs can't be played for now (they are greyed out and skipped). Put ffmpeg.exe next to the Linger program, or install FFmpeg and add it to PATH, then restart Linger.",
+
+  "scan.finding": "Looking for music files…",
+  "scan.progress": "Updating library {done} / {total}",
+  "scan.done": "Library updated: {n} songs, {change}.",
+  "scan.doneCount": "Library updated: {n} songs.",
+  "scan.added": "{n} added",
+  "scan.removed": "{n} removed",
+  "scan.noChange": "no changes",
+  "scan.skippedTitle": "{n} file(s) skipped",
+  "scan.withSkipped": "{msg} {n} file(s) were skipped.",
+  "scan.view": "View",
+  "scan.openSettings": "Open settings",
+  "scan.error": "Scan failed: {msg}",
+  "scan.stalled": "The scan has gone quiet for a long time and may have stopped. Try “Update library” again.",
+  "scan.lastInfo": "Last scan: {time}, {n} songs.",
+  "scan.never": "Not scanned yet."
 }
