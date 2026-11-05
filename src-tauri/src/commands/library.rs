@@ -229,7 +229,17 @@ impl Drop for PanicGuard<'_> {
     }
 }
 
+/// Relaxed fsync while a scan pass runs; restored on every exit path, including panic.
+struct BulkGuard<'a>(&'a AppState);
+impl Drop for BulkGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.db().set_bulk(false);
+    }
+}
+
 fn scan_pass(app: &AppHandle, state: &AppState) {
+    let _ = state.db().set_bulk(true);
+    let _bulk = BulkGuard(state);
     let roots = state.db().roots().unwrap_or_default();
     let online = probe_roots(&roots);
     state.set_online(online.clone());
@@ -243,6 +253,9 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
     crate::cover::prune_with_db(state);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let _ = state.db().set_setting("scanned_at", &now.to_string());
+    if state.db().relink_missing().unwrap_or(0) > 0 {
+        let _ = app.emit("playlists://changed", super::playlists::PlaylistsChanged { id: None, favorites: true });
+    }
     let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped });
 }
 

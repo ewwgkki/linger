@@ -60,6 +60,19 @@ pub fn run() {
             commands::player::player_set_shuffle,
             commands::player::player_set_repeat,
             commands::player::player_state,
+            commands::playlists::get_playlists,
+            commands::playlists::get_playlist,
+            commands::playlists::get_favorites,
+            commands::playlists::create_playlist,
+            commands::playlists::rename_playlist,
+            commands::playlists::delete_playlist,
+            commands::playlists::playlist_add,
+            commands::playlists::playlist_remove,
+            commands::playlists::playlist_move,
+            commands::playlists::set_favorite,
+            commands::playlists::get_saved,
+            commands::playlists::get_memberships,
+            commands::playlists::save_songs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Linger");
