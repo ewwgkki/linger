@@ -35,11 +35,19 @@ pub(super) fn read_ape(src: &mut Src, start: u64, info: &mut AudioInfo) {
     }
 }
 
+/// Largest APEv2 tag (incl. footer) we are willing to read.
+const MAX_APE_TAG: u64 = 16 << 20;
+
 /// APEv2 items before the footer at `foot_pos`.
 pub(super) fn parse_apev2(src: &mut Src, foot_pos: u64, foot: &[u8]) -> Tags {
     let tag_size = u32le(foot, 12) as u64;
     let count = u32le(foot, 16);
-    let items = src.read_at((foot_pos + 32).saturating_sub(tag_size), tag_size.saturating_sub(32) as usize);
+    // A corrupt footer can claim up to 4 GiB; real tags are far below 16 MiB and always fit
+    // before the footer. Skip such tags instead of reading (and allocating) most of the file.
+    if tag_size > MAX_APE_TAG || tag_size > foot_pos + 32 {
+        return Tags::default();
+    }
+    let items = src.read_at(foot_pos + 32 - tag_size, tag_size.saturating_sub(32) as usize);
     let mut tags = Tags::default();
     let mut p = 0usize;
     let mut i = 0;

@@ -421,6 +421,39 @@ mod tests {
         assert_eq!((i.title.as_str(), i.albumartist.as_str(), i.track), ("Hello", "Band", 7));
     }
 
+    fn ape_items_and_footer(title: &str, claimed_size: u32) -> (Vec<u8>, Vec<u8>) {
+        let mut items = Vec::new();
+        items.extend_from_slice(&(title.len() as u32).to_le_bytes());
+        items.extend_from_slice(&0u32.to_le_bytes());
+        items.extend_from_slice(b"Title\0");
+        items.extend_from_slice(title.as_bytes());
+        let mut foot = b"APETAGEX".to_vec();
+        foot.extend_from_slice(&2000u32.to_le_bytes());
+        foot.extend_from_slice(&claimed_size.to_le_bytes());
+        foot.extend_from_slice(&1u32.to_le_bytes());
+        foot.extend_from_slice(&[0u8; 12]);
+        (items, foot)
+    }
+
+    #[test]
+    fn apev2_footer_larger_than_file_is_ignored() {
+        // Footer claims ~4 GiB on a tiny file: must not read from offset 0 / the whole file.
+        let (items, foot) = ape_items_and_footer("Bogus", 0xFFFF_FFF0);
+        let p = write_temp("huge.mp3", &[items, vec![0u8; 300], foot].concat());
+        let i = read_audio_info(&p);
+        assert_eq!(i.title, "");
+    }
+
+    #[test]
+    fn apev2_footer_over_16mib_is_ignored() {
+        // Fits inside the file, but no real tag is this big: skipped without reading it.
+        let claimed = (16u32 << 20) + 4096;
+        let (items, foot) = ape_items_and_footer("Bogus", claimed);
+        let pad = claimed as usize - 32 - items.len();
+        let p = write_temp("big.mp3", &[items, vec![0u8; pad], foot].concat());
+        assert_eq!(read_audio_info(&p).title, "");
+    }
+
     #[test]
     fn truncated_id3_does_not_panic() {
         let mut b = b"ID3\x03\x00\x00\x00\x40\x00\x00".to_vec(); // declares 1 MiB
