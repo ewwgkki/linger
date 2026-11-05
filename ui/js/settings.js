@@ -2,6 +2,7 @@
 import { t, lang } from './i18n.js';
 import { api } from './api.js';
 import { esc, icon, applyOnline } from './util.js';
+import { missingText, summaryKey } from './importview.js';
 
 const $ = (id) => document.getElementById(id);
 /** With no scan event for this long, the scan thread is presumed dead and the UI is reset. */
@@ -41,6 +42,14 @@ export function openSettings() {
   renderRoots();
   scanInfo();
   ffmpegInfo();
+}
+
+/** Opens the settings dialog scrolled to the Spotify import section. */
+export function openImport() {
+  openSettings();
+  const sec = $('importsec');
+  sec.scrollIntoView({ block: 'center' });
+  $('importbtn').focus({ preventScroll: true });
 }
 
 function renderRoots() {
@@ -111,6 +120,75 @@ async function removeRoot(id) {
 }
 
 const errText = (e) => String((e && e.message) || e);
+
+// ---------- Spotify import ----------
+async function pickExports() {
+  const tauri = globalThis.__TAURI__;
+  const opts = { multiple: true, directory: false, filters: [{ name: t('import.pickFilter'), extensions: ['csv', 'zip', 'json'] }] };
+  if (tauri && tauri.dialog) return tauri.dialog.open(opts);
+  if (tauri) return tauri.core.invoke('plugin:dialog|open', { options: opts });
+  const p = prompt(t('import.promptPath'));
+  return p ? [p] : null;
+}
+
+async function runImport() {
+  let picked;
+  try {
+    picked = await pickExports();
+  } catch (e) {
+    $('importmsg').textContent = t('import.error', { msg: errText(e) });
+    return;
+  }
+  if (!picked || (Array.isArray(picked) && !picked.length)) return;
+  const paths = Array.isArray(picked) ? picked : [picked];
+  $('importmsg').textContent = '';
+  $('importbtn').disabled = true;
+  toast(t('import.running'), { spin: true });
+  try {
+    const report = await api.invoke('import_spotify', { paths });
+    hideToast();
+    showReport(report);
+  } catch (e) {
+    toast(t('import.error', { msg: t(errText(e)) }), { icon: 'x', autoHide: 6000 });
+    $('importmsg').textContent = t('import.error', { msg: t(errText(e)) });
+  } finally {
+    $('importbtn').disabled = false;
+  }
+}
+
+const fileName = (p) => String(p).split(/[\\/]/).pop();
+
+export function showReport(report) {
+  const [key, params] = summaryKey(report);
+  $('importsum').textContent = report.playlists.length ? t(key, params) : t('import.empty');
+  $('importlists').innerHTML = report.playlists.map((p) => {
+    const name = p.id != null
+      ? `<button type="button" class="imp-name" data-pl="${p.id}">${esc(p.name)}</button>`
+      : `<span class="imp-name off">${esc(p.name)}</span>`;
+    return `<div class="imp-row">${name}<span class="imp-n">${p.matched}/${p.total}</span>${p.id == null ? `<span class="imp-tag">${esc(t('import.notCreated'))}</span>` : ''}</div>`;
+  }).join('');
+  $('importfailbox').hidden = !report.failed.length;
+  $('importfails').innerHTML = report.failed.map((f) => `<li><b>${esc(fileName(f.source))}</b> &mdash; ${esc(t(f.reason))}</li>`).join('');
+  const text = missingText(report);
+  $('importmissing').value = text;
+  $('importmissing').hidden = true;
+  $('importcopy').hidden = !text;
+  $('importcopy').textContent = t('import.copyMissing');
+  const d = $('importdlg');
+  if (!d.open) d.showModal();
+}
+
+function copyMissing() {
+  const btn = $('importcopy'), box = $('importmissing');
+  const reset = () => setTimeout(() => { btn.textContent = t('import.copyMissing'); }, 1500);
+  const fallback = () => {
+    box.hidden = false; box.focus(); box.select();
+    btn.textContent = t('import.selected'); reset();
+  };
+  const done = () => { btn.textContent = t('import.copied'); reset(); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(box.value).then(done).catch(fallback);
+  else fallback();
+}
 
 // ---------- scan ----------
 const scan = { running: false, user: false, toast: false, started: 0, before: null, stall: 0 };
@@ -228,6 +306,17 @@ export function initSettings(c, { loadLibrary }) {
   $('toastx').onclick = hideToast;
   $('addfolder').onclick = addFolders;
   $('scanbtn').onclick = () => startScan(true);
+  $('importbtn').onclick = runImport;
+  $('importcopy').onclick = copyMissing;
+  $('importclose').onclick = () => $('importdlg').close();
+  $('importx').onclick = () => $('importdlg').close();
+  $('importlists').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pl]');
+    if (!b) return;
+    $('importdlg').close();
+    $('settings').close();
+    ctx.openPlaylist(+b.dataset.pl);
+  });
   $('refresh').onclick = () => startScan(true);
   $('rootlist').addEventListener('click', (e) => {
     const b = e.target.closest('[data-rm]');

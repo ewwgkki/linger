@@ -171,6 +171,15 @@
         </div>
         <p class="hint" data-i18n="settings.scanHint"></p>
       </section>
+      <section id="importsec">
+        <h3 data-i18n="import.title"></h3>
+        <p class="hint" data-i18n="import.step1"></p>
+        <p class="hint" data-i18n="import.step2"></p>
+        <div class="row">
+          <button class="btn" type="button" id="importbtn"><svg class="i"><use href="#i-new"/></svg><span data-i18n="import.pick"></span></button>
+          <span class="hint" id="importmsg" aria-live="polite"></span>
+        </div>
+      </section>
       <section>
         <h3 data-i18n="settings.ffmpeg"></h3>
         <p class="hint" id="ffmpeginfo"></p>
@@ -196,6 +205,22 @@
     <div class="dlg-body">
       <p class="dlg-text" id="confirmtext"></p>
       <div class="dlg-acts"><button class="btn" type="button" id="confirmcancel" data-i18n="dlg.cancel"></button><button class="btn" type="button" id="confirmok"></button></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="importdlg">
+  <div class="dlg">
+    <div class="dlg-head"><h2 data-i18n="import.reportTitle"></h2><button class="icon-btn" type="button" id="importx" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-body">
+      <p class="dlg-text" id="importsum"></p>
+      <div class="imp-lists" id="importlists"></div>
+      <div id="importfailbox" hidden>
+        <h3 data-i18n="import.failedTitle"></h3>
+        <ul class="imp-fails" id="importfails"></ul>
+      </div>
+      <textarea class="field imp-missing" id="importmissing" readonly rows="6" hidden data-i18n-aria-label="import.missingBox"></textarea>
+      <div class="dlg-acts"><button class="btn" type="button" id="importcopy" data-i18n="import.copyMissing"></button><button class="btn primary" type="button" id="importclose" data-i18n="import.close"></button></div>
     </div>
   </div>
 </dialog>

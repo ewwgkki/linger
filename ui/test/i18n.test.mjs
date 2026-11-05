@@ -29,7 +29,8 @@ test('backend keys are present', () => {
   const zh = load('zh-CN');
   for (const k of ['skip.notaudio', 'skip.unreadable', 'skip.dberror', 'player.notFound', 'player.needFfmpeg',
     'player.unsupported', 'player.io', 'player.corrupt', 'player.noOutput', 'song.offline', 'meta.songs',
-    'queue.badPart', 'queue.badIndex']) {
+    'queue.badPart', 'queue.badIndex', 'import.unsupported', 'import.tooLarge', 'import.unreadable', 'import.notCsv',
+    'import.missingColumns', 'import.badJson', 'import.empty', 'import.badZip']) {
     assert.ok(k in zh, k);
   }
 });

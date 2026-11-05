@@ -7,7 +7,7 @@ import { renderSongs, QUALITIES, qLabel, rootLabel, fullPath, rowHeight } from '
 import { renderShelf } from './views/shelf.js';
 import { renderPlaylist, defaultPlSort } from './views/playlist.js';
 import { initPlayer, playList, markRows, libraryChanged, showSaved } from './player.js';
-import { initSettings, openSettings, toast } from './settings.js';
+import { initSettings, openSettings, openImport, toast } from './settings.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
@@ -44,6 +44,7 @@ export const ctx = {
   /** Plays `list` (already filtered to playable songs) from `start`. */
   playList: (list, start, shuffle) => playList(list, start, shuffle),
   openSettings: () => { closeDrawer(); openSettings(); },
+  openImport: () => { closeDrawer(); openImport(); },
   openPlaylist: (id) => openPlaylist(id),
   goArtist: (a) => go({ artist: a, album: null, sort: { col: 'b', dir: 1 } }),
   goAlbum: (b) => go({ album: b, artist: null, sort: { col: 'n', dir: 1 } }),
@@ -136,7 +137,7 @@ $('rootnav').addEventListener('click', (e) => {
 $('plnav').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pl]');
   if (b) { openPlaylist(+b.dataset.pl); return; }
-  if (e.target.closest('[data-import]')) { closeDrawer(); if (ctx.openImport) ctx.openImport(); else ctx.openSettings(); }
+  if (e.target.closest('[data-import]')) { closeDrawer(); ctx.openImport(); }
 });
 $('newpl').onclick = () => newPlaylist();
 function closeDrawer() { $('side').classList.remove('open'); $('scrim').classList.remove('open'); }

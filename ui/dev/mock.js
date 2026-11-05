@@ -1,10 +1,11 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
 // URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
-// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag (screenshots only:
+// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag|import|report (screenshots only:
 // selects rows 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
 // menu1: plays the first playable row and opens the menu for row 4 alone; queue: plays the list, queues three
 // songs and opens the queue panel; qmenu: also right-clicks a queued row; drag: starts dragging row 1 by its
-// grip down to row 4 on a playlist page).
+// grip down to row 4 on a playlist page; import: opens settings at the import section; report: runs the mock import
+// through the settings button flow and shows the report dialog).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -154,6 +155,23 @@ export function createMock() {
   }
 
   const commands = {
+    // fixed report: one list with missing songs, one with no match (not created), one unreadable file
+    import_spotify: ({ paths }) => {
+      if (!paths || !paths.length) throw 'import.empty';
+      const ids = lib.songs.slice(0, 14).map((x) => x.id);
+      const l = { id: nextList++, name: 'Imported mix', items: ids.map((id, k) => item(id, now() + k)) };
+      lists.push(l);
+      changed(l.id, false);
+      return {
+        playlists: [
+          { source: 'Imported_mix.csv', name: 'Imported mix', id: l.id, total: 17, matched: 14,
+            missing: [{ t: '晴天', a: '周杰伦', b: '叶惠美' }, { t: 'Yesterday', a: 'The Beatles', b: '' }, { t: 'Blue', a: 'Unknown Artist', b: 'Demo' }] },
+          { source: 'Nothing_found.csv', name: 'Nothing found', id: null, total: 3, matched: 0,
+            missing: [{ t: 'A', a: 'B', b: '' }, { t: 'C', a: 'D', b: 'E' }, { t: 'F', a: 'G', b: '' }] },
+        ],
+        failed: [{ source: 'D:\\Downloads\\notes.csv', reason: 'import.missingColumns' }],
+      };
+    },
     get_playlists: () => lists.map(dto),
     get_playlist: ({ id }) => findList(id).items.map((x) => ({ ...x })),
     get_favorites: () => fav.map((x) => ({ ...x })),
@@ -275,6 +293,13 @@ export function createMock() {
 function shot(what, commands) {
   const rows = () => [...document.querySelectorAll('#songlist .song')];
   const click = (el, o) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...o }));
+  if (what === 'import' || what === 'report') {
+    window.addEventListener('resize', (e) => e.stopImmediatePropagation(), true);
+    const link = document.querySelector('#plnav [data-import]');
+    (link || document.querySelector('#opensettings')).click();
+    if (what === 'report') setTimeout(async () => { const { showReport } = await import('../js/settings.js'); showReport(await commands.import_spotify({ paths: ['x'] })); }, 200);
+    return;
+  }
   if (rows().length < 8) return;
   // the headless capture resizes the window, which would close the menu / popover
   if (what !== 'sel') window.addEventListener('resize', (e) => e.stopImmediatePropagation(), true);
