@@ -192,7 +192,9 @@ pub fn resolve(sheet: &CueSheet, folder: &str, tracklist: &[(u32, String)]) -> V
         .unwrap_or_else(|| folder.to_string());
     let mut out = vec![];
     for file in &sheet.files {
-        let use_list = !tracklist.is_empty() && tracklist.len() == file.tracks.len();
+        // A list may be shorter than the CUE (unlisted hidden track): its names go to
+        // tracks 1..N by number; a list longer than the CUE belongs to something else.
+        let use_list = !tracklist.is_empty() && tracklist.len() <= file.tracks.len();
         for (i, t) in file.tracks.iter().enumerate() {
             let title = real(&t.title)
                 .map(str::to_string)
@@ -278,13 +280,24 @@ mod tests {
     }
 
     #[test]
-    fn tracklist_count_mismatch_falls_back_to_track_nn() {
+    fn shorter_tracklist_names_leading_tracks() {
+        // e.g. a hidden 10th track the booklet does not list
         let sheet = parse_cue(&gbk(&sample_cue())).unwrap();
         let list = parse_tracklist_txt(&gbk(&list_txt(9)));
         assert_eq!(list.len(), 9);
         let songs = resolve(&sheet, "示例歌手《晴天集》x", &list);
-        assert_eq!(songs[0].title, "Track 01");
+        assert_eq!(songs[0].title, "甲");
+        assert_eq!(songs[8].title, "壬");
         assert_eq!(songs[9].title, "Track 10");
+    }
+
+    #[test]
+    fn longer_tracklist_is_ignored() {
+        let cue = "FILE \"a.wav\" WAVE\n TRACK 01 AUDIO\n  INDEX 01 00:00:00\n TRACK 02 AUDIO\n  INDEX 01 01:00:00\n";
+        let sheet = parse_cue(cue.as_bytes()).unwrap();
+        let list = parse_tracklist_txt(&gbk(&list_txt(3)));
+        let s = resolve(&sheet, "f", &list);
+        assert_eq!((s[0].title.as_str(), s[1].title.as_str()), ("Track 01", "Track 02"));
     }
 
     #[test]

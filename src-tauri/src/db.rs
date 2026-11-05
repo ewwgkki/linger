@@ -101,6 +101,11 @@ impl Db {
         Ok(Db { conn })
     }
 
+    #[cfg(test)]
+    pub(crate) fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
     pub fn roots(&self) -> Result<Vec<Root>> {
         let mut st = self.conn.prepare("SELECT id, path FROM roots ORDER BY id")?;
         let v = st.query_map([], |r| Ok(Root { id: r.get(0)?, path: r.get(1)? }))?

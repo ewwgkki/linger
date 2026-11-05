@@ -18,6 +18,8 @@ pub const SKIP_DIRS: &[&str] = &["@eaDir", "#recycle", "#snapshot", "$RECYCLE.BI
 pub const AUDIO_EXT: &[&str] = &["mp3", "mp2", "flac", "m4a", "mp4", "aac", "wav", "wma", "ape", "ogg", "opus"];
 const COVER_NAMES: &[&str] = &["封面", "cover", "folder", "front", "albumartlarge", "albumart"];
 const COVER_EXT: &[&str] = &["jpg", "jpeg", "png"];
+/// Re-probe timeout when a root seems to vanish during a scan.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Skipped {
@@ -148,12 +150,21 @@ fn walk(root: &Path) -> Walk {
             continue;
         };
         let mut df = DirFiles::default();
-        for e in rd.flatten() {
+        let mut partial = false;
+        for e in rd {
+            // a listing cut short (SMB drop) must not look complete, or the rest gets deleted
+            let Ok(e) = e else {
+                partial = true;
+                break;
+            };
             let Ok(name) = e.file_name().into_string() else { continue };
             if name.starts_with('.') {
                 continue;
             }
-            let Ok(ft) = e.file_type() else { continue };
+            let Ok(ft) = e.file_type() else {
+                partial = true;
+                continue;
+            };
             if ft.is_dir() {
                 if !SKIP_DIRS.contains(&name.as_str()) {
                     stack.push(join_rel(&sub, &name));
@@ -168,7 +179,10 @@ fn walk(root: &Path) -> Walk {
             if ext == "txt" {
                 df.txts.push(name);
             } else if is_audio || ext == "cue" {
-                let Ok(m) = e.metadata() else { continue };
+                let Ok(m) = e.metadata() else {
+                    partial = true;
+                    continue;
+                };
                 let ent = Entry { name, size: m.len(), mtime: mtime_of(&m) };
                 if is_audio { df.audio.push(ent) } else { df.cues.push(ent) }
             }
@@ -176,6 +190,9 @@ fn walk(root: &Path) -> Walk {
         df.audio.sort_by(|a, b| a.name.cmp(&b.name));
         df.cues.sort_by(|a, b| a.name.cmp(&b.name));
         df.txts.sort();
+        if partial {
+            w.failed.push(sub.clone());
+        }
         w.dirs.insert(sub, df);
     }
     w
@@ -209,7 +226,8 @@ fn plan_cues(root: &Path, dir_rel: &str, folder: &str, df: &DirFiles) -> CuePlan
                 .collect()
         });
         let ntracks: usize = sheet.files.iter().map(|f| f.tracks.len()).sum();
-        let list = lists.iter().find(|l| l.len() == ntracks).cloned().unwrap_or_default();
+        // longest track list that does not exceed the CUE (exact match preferred)
+        let list = lists.iter().filter(|l| l.len() <= ntracks).max_by_key(|l| l.len()).cloned().unwrap_or_default();
         let songs = resolve(&sheet, folder, &list);
         let sig = cue_sig(c);
         let unclaimed = |plan: &CuePlan| -> Vec<&Entry> {
@@ -279,6 +297,20 @@ fn build_songs(root: &Root, rel: &str, info: &crate::tags::AudioInfo, cue: Optio
     }]
 }
 
+/// Stored files of a root that were not seen, excluding anything under a folder
+/// that could not be (fully) listed; nothing at all if the root itself failed.
+fn gone_files(sigs: &HashMap<String, FileSig>, seen: &HashSet<String>, failed: &[String]) -> Vec<String> {
+    if failed.iter().any(|f| f.is_empty()) {
+        return vec![];
+    }
+    let prefixes: Vec<String> = failed.iter().map(|f| format!("{f}/")).collect();
+    sigs.keys()
+        .filter(|rel| !seen.contains(*rel))
+        .filter(|rel| !prefixes.iter().any(|p| rel.starts_with(p.as_str())))
+        .cloned()
+        .collect()
+}
+
 fn display(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
@@ -303,6 +335,7 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
         let mut sigs: HashMap<String, FileSig> = HashMap::new();
         with(&mut |db| sigs = db.file_sigs(root.id).unwrap_or_default());
         let mut seen: HashSet<String> = HashSet::new();
+        let mut root_lost = false;
 
         for (dir_rel, df) in &w.dirs {
             let folder = match dir_rel.rsplit('/').next() {
@@ -338,10 +371,19 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
                         s.size == a.size && s.mtime == a.mtime && s.cue_sig.as_ref() == cue.map(|c| &c.1)
                     })
                 };
-                if unchanged {
+                let abs = abs_path(root_path, &rel);
+                if unchanged || root_lost {
+                    // root_lost: the share went away mid-scan; keep everything as it is
                     seen.insert(rel);
+                } else if std::fs::File::open(&abs).is_err() {
+                    // transient failure (SMB hiccup, locked file): keep the old row and its old
+                    // sig so the next scan retries, instead of storing an empty song
+                    rep.skipped.push(Skipped { path: display(&abs), why: "skip.unreadable".into() });
+                    seen.insert(rel);
+                    if !root_online(root_path, PROBE_TIMEOUT) {
+                        root_lost = true;
+                    }
                 } else {
-                    let abs = abs_path(root_path, &rel);
                     let info = read_audio_info(&abs);
                     rep.read += 1;
                     if info.codec == "notaudio" {
@@ -368,11 +410,11 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
                         let songs = build_songs(root, &rel, &info, cue.map(|c| &c.0));
                         let mut ok = true;
                         with(&mut |db| ok = db.replace_file(root.id, &meta, &songs).is_ok());
-                        if ok {
-                            seen.insert(rel);
-                        } else {
+                        if !ok {
                             rep.skipped.push(Skipped { path: display(&abs), why: "skip.dberror".into() });
                         }
+                        // on failure the previous row (if any) stays
+                        seen.insert(rel);
                     }
                 }
                 done += 1;
@@ -383,19 +425,12 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
             }
         }
 
-        // Forget files no longer present - except under folders that could not be listed.
-        if !w.failed.iter().any(|f| f.is_empty()) {
-            let gone: Vec<String> = sigs
-                .keys()
-                .filter(|rel| !seen.contains(*rel))
-                .filter(|rel| !w.failed.iter().any(|f| rel.starts_with(&format!("{f}/"))))
-                .cloned()
-                .collect();
-            if !gone.is_empty() {
-                with(&mut |db| {
-                    let _ = db.delete_files(root.id, &gone);
-                });
-            }
+        // Forget files no longer present - unless the root vanished mid-scan.
+        let gone = gone_files(&sigs, &seen, &w.failed);
+        if !gone.is_empty() && !root_lost && root_online(root_path, PROBE_TIMEOUT) {
+            with(&mut |db| {
+                let _ = db.delete_files(root.id, &gone);
+            });
         }
     }
     progress(Progress { done, total });
@@ -593,6 +628,91 @@ mod tests {
         let (db, roots, online) = setup(t.path());
         let m = Mutex::new(db);
         assert_eq!(scan_shared(&m, &roots, &online, &mut |_| {}).count, 1);
+    }
+
+    #[test]
+    fn rescan_detects_cue_change() {
+        let t = tempfile::tempdir().unwrap();
+        cue_album(t.path(), XW, "未知艺术家 - 未知标题.wav");
+        let (mut db, roots, online) = setup(t.path());
+        run(&mut db, &roots, &online);
+        let cue = "FILE \"未知艺术家 - 未知标题.wav\" WAVE\r\n  TRACK 01 AUDIO\r\n    TITLE \"新歌一\"\r\n    INDEX 01 00:00:00\r\n\
+                   \x20 TRACK 02 AUDIO\r\n    TITLE \"新歌二\"\r\n    INDEX 01 00:05:00\r\n";
+        put(t.path(), &format!("{XW}/未知艺术家 - 未知标题.cue"), &gbk(cue));
+        let rep = run(&mut db, &roots, &online);
+        assert_eq!((rep.count, rep.read), (2, 1));
+        let titles: Vec<_> = db.all_songs().unwrap().into_iter().map(|s| s.title).collect();
+        assert_eq!(titles, ["新歌一", "新歌二"]);
+    }
+
+    #[test]
+    fn removing_cue_reverts_to_one_song() {
+        let t = tempfile::tempdir().unwrap();
+        cue_album(t.path(), XW, "未知艺术家 - 未知标题.wav");
+        let (mut db, roots, online) = setup(t.path());
+        assert_eq!(run(&mut db, &roots, &online).count, 3);
+        fs::remove_file(t.path().join(XW).join("未知艺术家 - 未知标题.cue")).unwrap();
+        let rep = run(&mut db, &roots, &online);
+        assert_eq!((rep.count, rep.read), (1, 1));
+        let s = db.all_songs().unwrap();
+        assert_eq!((s[0].start_ms, s[0].end_ms), (0, None));
+        assert!((s[0].duration - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn dberror_keeps_previous_row() {
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "b.mp3", &mp3("b"));
+        let (mut db, roots, online) = setup(t.path());
+        run(&mut db, &roots, &online);
+        db.conn()
+            .execute_batch("CREATE TRIGGER boom BEFORE INSERT ON songs WHEN NEW.title='boom' BEGIN SELECT RAISE(ABORT,'boom'); END;")
+            .unwrap();
+        put(t.path(), "b.mp3", &mp3("boom"));
+        let rep = run(&mut db, &roots, &online);
+        assert_eq!(rep.skipped.len(), 1);
+        assert_eq!(rep.skipped[0].why, "skip.dberror");
+        let s = db.all_songs().unwrap();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].title, "b");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn open_failure_keeps_previous_row() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let t = tempfile::tempdir().unwrap();
+        put(t.path(), "a.mp3", &mp3("a"));
+        put(t.path(), "b.mp3", &mp3("b"));
+        let (mut db, roots, online) = setup(t.path());
+        run(&mut db, &roots, &online);
+        put(t.path(), "b.mp3", &mp3("b-changed-and-longer"));
+        // exclusive handle: any other open fails with a sharing violation
+        let lock = fs::OpenOptions::new().read(true).share_mode(0).open(t.path().join("b.mp3")).unwrap();
+        let rep = run(&mut db, &roots, &online);
+        assert_eq!(rep.skipped.iter().map(|s| s.why.as_str()).collect::<Vec<_>>(), ["skip.unreadable"]);
+        let s = db.all_songs().unwrap();
+        assert_eq!(s.len(), 2);
+        assert!(s.iter().any(|s| s.title == "b" && s.duration > 0.0));
+        drop(lock);
+        // once readable again, the change is picked up (the old sig was kept)
+        let rep = run(&mut db, &roots, &online);
+        assert_eq!(rep.read, 1);
+        assert!(db.all_songs().unwrap().iter().any(|s| s.title == "b-changed-and-longer"));
+    }
+
+    #[test]
+    fn gone_files_respects_failed_dirs() {
+        let sig = FileSig { id: 1, size: 1, mtime: 1, cue_sig: None };
+        let sigs: HashMap<String, FileSig> = ["a/x.mp3", "a/b/y.mp3", "ab/z.mp3", "c.mp3", "d.mp3"]
+            .into_iter()
+            .map(|r| (r.to_string(), sig.clone()))
+            .collect();
+        let seen = HashSet::from(["d.mp3".to_string()]);
+        let mut gone = gone_files(&sigs, &seen, &["a".to_string()]);
+        gone.sort();
+        assert_eq!(gone, ["ab/z.mp3", "c.mp3"]);
+        assert!(gone_files(&sigs, &seen, &[String::new()]).is_empty());
     }
 
     #[test]
