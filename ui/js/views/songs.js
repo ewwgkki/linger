@@ -65,28 +65,29 @@ export function emptyLibrary() {
 
 const joinNames = (names, max) => names.slice(0, max).join(t('list.sep')) + (names.length > max ? t('list.etc') : '');
 
-const SORTS = [['a', 'sort.artist'], ['t', 'sort.title'], ['b', 'sort.album'], ['s', 'sort.duration'], ['br', 'sort.quality']];
+export const SORTS = [['a', 'sort.artist'], ['t', 'sort.title'], ['b', 'sort.album'], ['s', 'sort.duration'], ['br', 'sort.quality']];
 
 /** Row height from CSS (72px, 64px on narrow windows). */
 export const rowHeight = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-h')) || 72;
-const DETAIL_H = 56;
+export const DETAIL_H = 56;
 
-function rowHtml(ctx, s, q) {
+/** One song row (and its detail panel when open). Playlist rows may be `missing` (file gone from the library). */
+export function rowHtml(ctx, s, q) {
   const { state, caps } = ctx;
   const ok = playable(s, caps);
   const artist = s.a ? `<button class="link" data-artist="${esc(s.a)}">${hl(s.a, q)}</button>` : `<span class="unk">${esc(t('song.unknownArtist'))}</span>`;
   const album = s.b && state.album == null
     ? `<button class="link" data-album="${esc(s.b)}">${t('song.album', { b: hl(s.b, q) })}</button><span class="sep">-</span>` : '';
-  const why = !s.av ? t('song.offline') : !ok ? t('song.needFfmpeg', { fmt: fmtLabel(s) }) : '';
-  const open = state.open === s.id;
-  const cls = `song${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}`;
+  const why = s.missing ? t('playlist.missingTip') : !s.av ? t('song.offline') : !ok ? t('song.needFfmpeg', { fmt: fmtLabel(s) }) : '';
+  const open = state.open === s.id && !s.missing;
+  const cls = `song${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}`;
   const play = ok
     ? `<button class="rbtn play" type="button" data-play="${esc(s.id)}" aria-label="${esc(t('song.playAria', { t: s.t }))}" title="${esc(t('song.play'))}">`
     : `<button class="rbtn play" type="button" disabled aria-label="${esc(why)}" title="${esc(why)}">`;
   const row = `<div class="${cls}" data-id="${esc(s.id)}" tabindex="0" role="button" aria-expanded="${open}"${why ? ` title="${esc(why)}"` : ''}>
     ${art(s)}
     <div class="s-main">
-      <div class="s-l1"><span class="eq"><i></i><i></i><i></i></span>${s.n && state.album != null ? `<span class="tn">${String(s.n).padStart(2, '0')}</span>` : ''}<span class="t">${hl(s.t, q)}</span>${badges(s)}</div>
+      <div class="s-l1"><span class="eq"><i></i><i></i><i></i></span>${s.n && state.album != null ? `<span class="tn">${String(s.n).padStart(2, '0')}</span>` : ''}<span class="t">${hl(s.t, q)}</span>${s.missing ? `<span class="lost">${esc(t('playlist.missing'))}</span>` : badges(s)}</div>
       <div class="s-l2">${album}${artist}</div>
     </div>
     <div class="s-right">

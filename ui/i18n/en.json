@@ -148,5 +148,49 @@
   "scan.error": "Scan failed: {msg}",
   "scan.stalled": "The scan has gone quiet for a long time and may have stopped. Try “Update library” again.",
   "scan.lastInfo": "Last scan: {time}, {n} songs.",
-  "scan.never": "Not scanned yet."
+  "scan.never": "Not scanned yet.",
+
+  "side.favorites": "Liked songs",
+  "side.playlists": "Playlists",
+  "side.noPlaylists": "No playlists yet",
+  "side.importSpotify": "Import Spotify playlists",
+
+  "playlist.new": "New playlist",
+  "playlist.newTitle": "New playlist",
+  "playlist.renameTitle": "Rename playlist",
+  "playlist.namePlaceholder": "Playlist name",
+  "playlist.kicker": "Playlist",
+  "playlist.rename": "Rename",
+  "playlist.delete": "Delete",
+  "playlist.deleteTitle": "Delete playlist",
+  "playlist.deleteText": "Delete the playlist “{name}”? Only the playlist is removed; no music files are deleted.",
+  "playlist.deleted": "Deleted the playlist “{name}”",
+  "playlist.nameEmpty": "Enter a playlist name",
+  "playlist.nameTooLong": "The name is too long (100 characters at most)",
+  "playlist.notFound": "This playlist doesn't exist",
+  "playlist.backToSongs": "Back to songs",
+  "playlist.loading": "Loading…",
+  "playlist.missing": "File missing",
+  "playlist.missingTip": "This song's file is no longer in the library, so it can't be played",
+  "playlist.missingCount": "{n} songs have missing files and will be skipped",
+  "playlist.emptyTitle": "This playlist is empty",
+  "playlist.emptyText": "Save songs to it from the song list.",
+
+  "fav.kicker": "Favorites",
+  "fav.title": "Liked songs",
+  "fav.emptyTitle": "No liked songs yet",
+  "fav.emptyText": "Tap the heart on a song to save it here.",
+
+  "sort.custom": "Custom order",
+  "sort.added": "Date added",
+
+  "save.added": "Saved {n} songs",
+  "save.removed": "Removed {n} songs",
+  "save.changed": "Saved {n} songs, removed {r}",
+  "save.nothing": "Nothing changed",
+
+  "dlg.ok": "OK",
+  "dlg.cancel": "Cancel",
+  "dlg.create": "Create",
+  "dlg.save": "Save"
 }

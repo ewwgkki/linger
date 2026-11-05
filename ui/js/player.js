@@ -12,7 +12,7 @@ const REPEAT_KEY = { all: 'player.repeatAll', one: 'player.repeatOne', off: 'pla
 let ctx = null;
 /** Last state from the backend. */
 let ps = { id: null, playing: false, pos: 0, dur: 0, shuffle: false, repeat: 'all', volume: 100 };
-/** The songs-page filters the current queue was started from (for revealNow(true)). */
+/** The page and filters the current queue was started from (for revealNow(true)). */
 let source = null;
 let seekDrag = { dragging: () => false };
 /** Ignore `player://pos` briefly after a seek: events already in flight carry the old spot. */
@@ -109,7 +109,7 @@ const call = (cmd, args) => api.invoke(cmd, args).catch((e) => console.error(cmd
 export function playList(list, start, shuffle) {
   if (!list.length) return;
   const st = ctx.state;
-  source = { artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root };
+  source = { tab: st.tab, pl: st.pl, plSort: st.plSort && { ...st.plSort }, artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root };
   hideError();
   call('player_play_list', { ids: list.map((s) => s.id), start: Math.max(0, Math.min(list.length - 1, start)), shuffle: !!shuffle });
 }

@@ -1,5 +1,6 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
-// URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark.
+// URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
+// &pl=0 (start without playlists or favorites).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -93,7 +94,94 @@ export function createMock() {
     if (ps.pos >= ps.dur) { if (qi + 1 < queue.length) load(qi + 1); else { ps.playing = false; pushState(); } }
   }, 250);
 
+  // ---------- playlists and favorites (in memory; favorites are target 0 in save_songs) ----------
+  const now = () => Math.floor(Date.now() / 1000);
+  const snap = (id) => { const x = byId.get(id); return x ? { t: x.t, a: x.a, b: x.b, s: x.s } : null; };
+  let nextItem = 1, nextList = 1;
+  const lists = [], fav = [];
+  const item = (id, ad, extra) => ({ i: nextItem++, id, ad, ...(snap(id) || extra) });
+  const findList = (id) => { const l = lists.find((x) => x.id === id); if (!l) throw 'playlist.notFound'; return l; };
+  const validName = (name) => {
+    const n = String(name || '').trim();
+    if (!n) throw 'playlist.nameEmpty';
+    if ([...n].length > 100) throw 'playlist.nameTooLong';
+    return n;
+  };
+  const dto = (l) => ({ id: l.id, name: l.name, count: l.items.length, dur: l.items.reduce((a, x) => a + x.s, 0) });
+  const changed = (id, favorites) => emit('playlists://changed', { id, favorites });
+  const addTo = (items, ids) => {
+    let added = 0, duplicate = 0;
+    for (const id of ids) {
+      if (!byId.has(id)) continue;
+      if (items.some((x) => x.id === id)) { duplicate++; continue; }
+      items.push(item(id, now())); added++;
+    }
+    return { added, duplicate };
+  };
+  const removeFrom = (items, ids) => {
+    let n = 0;
+    for (const id of ids) { const k = items.findIndex((x) => x.id === id); if (k >= 0) { items.splice(k, 1); n++; } }
+    return n;
+  };
+  if (qs.get('pl') !== '0' && lib.songs.length) {
+    const t0 = now() - 86400 * 30;
+    const pick = (from, n, step) => Array.from({ length: n }, (_, k) => lib.songs[(from + k * step) % lib.songs.length].id);
+    const seed = [['Late night', pick(3, 24, 7)], [qs.get('lang') === 'en' ? 'Weekend mornings' : '周末早晨', pick(40, 9, 13)], ['Road trip', pick(11, 40, 5)]];
+    for (const [name, ids] of seed) {
+      const l = { id: nextList++, name, items: ids.map((id, k) => item(id, t0 + k * 600)) };
+      lists.push(l);
+    }
+    // a song that has left the library: only its snapshot remains
+    lists[0].items.splice(2, 0, item('deadbeef0', t0 + 30, { t: 'Gone Song', a: 'Nobody', b: 'Lost Album', s: 201 }));
+    for (const [k, id] of pick(5, 14, 11).entries()) fav.unshift(item(id, t0 + k * 3600));
+  }
+
   const commands = {
+    get_playlists: () => lists.map(dto),
+    get_playlist: ({ id }) => findList(id).items.map((x) => ({ ...x })),
+    get_favorites: () => fav.map((x) => ({ ...x })),
+    get_saved: () => [...new Set([...fav, ...lists.flatMap((l) => l.items)].map((x) => x.id))],
+    get_memberships: ({ songIds }) => {
+      const ids = new Set(songIds);
+      const n = (items) => items.filter((x) => ids.has(x.id)).length;
+      return { total: ids.size, fav: n(fav), lists: lists.map((l) => [l.id, n(l.items)]).filter(([, c]) => c) };
+    },
+    create_playlist: ({ name, songIds = [] }) => {
+      const l = { id: nextList++, name: validName(name), items: [] };
+      addTo(l.items, songIds);
+      lists.push(l);
+      changed(l.id, false);
+      return dto(l);
+    },
+    rename_playlist: ({ id, name }) => { const l = findList(id); l.name = validName(name); changed(id, false); },
+    delete_playlist: ({ id }) => { findList(id); lists.splice(lists.findIndex((l) => l.id === id), 1); changed(id, false); },
+    playlist_add: ({ id, songIds }) => { const r = addTo(findList(id).items, songIds); changed(id, false); return r; },
+    playlist_remove: ({ id, itemIds }) => { const l = findList(id); l.items = l.items.filter((x) => !itemIds.includes(x.i)); changed(id, false); },
+    playlist_move: ({ id, itemId, to }) => {
+      const l = findList(id), k = l.items.findIndex((x) => x.i === itemId);
+      if (k < 0) return;
+      const [x] = l.items.splice(k, 1);
+      l.items.splice(Math.max(0, Math.min(l.items.length, to)), 0, x);
+      changed(id, false);
+    },
+    set_favorite: ({ songIds, on }) => {
+      const n = on ? addTo(fav, songIds).added : removeFrom(fav, songIds);
+      fav.sort((a, b) => b.ad - a.ad || b.i - a.i);
+      changed(null, true);
+      return n;
+    },
+    save_songs: ({ songIds, add = [], remove = [] }) => {
+      const r = { added: 0, duplicate: 0, removed: 0 };
+      for (const id of add) {
+        const o = addTo(id === 0 ? fav : findList(id).items, songIds);
+        r.added += o.added; r.duplicate += o.duplicate;
+      }
+      for (const id of remove) r.removed += removeFrom(id === 0 ? fav : findList(id).items, songIds);
+      fav.sort((a, b) => b.ad - a.ad || b.i - a.i);
+      changed(null, true);
+      return r;
+    },
+
     get_library: () => ({ roots: lib.roots.map((r) => ({ ...r })), songs: lib.songs, scanned_at: count ? Math.floor(Date.now() / 1000) - 3600 : null, ffmpeg }),
     add_roots: ({ paths }) => {
       for (const p of paths) if (!lib.roots.some((r) => r.path === p)) lib.roots.push({ id: Math.max(0, ...lib.roots.map((r) => r.id)) + 1, path: p, online: true, count: 0 });

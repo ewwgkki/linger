@@ -148,5 +148,49 @@
   "scan.error": "扫描出错：{msg}",
   "scan.stalled": "扫描很久没有动静，可能已经中断。可以再点一次“更新曲库”。",
   "scan.lastInfo": "上次扫描：{time}，共 {n} 首。",
-  "scan.never": "还没有扫描过。"
+  "scan.never": "还没有扫描过。",
+
+  "side.favorites": "我喜欢的音乐",
+  "side.playlists": "歌单",
+  "side.noPlaylists": "还没有歌单",
+  "side.importSpotify": "导入 Spotify 歌单",
+
+  "playlist.new": "新建歌单",
+  "playlist.newTitle": "新建歌单",
+  "playlist.renameTitle": "重命名歌单",
+  "playlist.namePlaceholder": "歌单名称",
+  "playlist.kicker": "歌单",
+  "playlist.rename": "重命名",
+  "playlist.delete": "删除",
+  "playlist.deleteTitle": "删除歌单",
+  "playlist.deleteText": "确定删除歌单“{name}”吗？只删除歌单，不会删除任何音乐文件。",
+  "playlist.deleted": "已删除歌单“{name}”",
+  "playlist.nameEmpty": "请输入歌单名称",
+  "playlist.nameTooLong": "歌单名称太长了（最多 100 个字）",
+  "playlist.notFound": "找不到这个歌单",
+  "playlist.backToSongs": "回到歌曲",
+  "playlist.loading": "正在加载…",
+  "playlist.missing": "文件已丢失",
+  "playlist.missingTip": "曲库里已经找不到这首歌的文件，无法播放",
+  "playlist.missingCount": "{n} 首文件已丢失，不会播放",
+  "playlist.emptyTitle": "这个歌单还是空的",
+  "playlist.emptyText": "在歌曲列表里把歌收藏到这个歌单。",
+
+  "fav.kicker": "收藏",
+  "fav.title": "我喜欢的音乐",
+  "fav.emptyTitle": "还没有喜欢的音乐",
+  "fav.emptyText": "在歌曲列表里点心形，把喜欢的歌收藏到这里。",
+
+  "sort.custom": "自定义顺序",
+  "sort.added": "收藏时间",
+
+  "save.added": "已收藏 {n} 首",
+  "save.removed": "已移除 {n} 首",
+  "save.changed": "已收藏 {n} 首，移除 {r} 首",
+  "save.nothing": "没有变化",
+
+  "dlg.ok": "确定",
+  "dlg.cancel": "取消",
+  "dlg.create": "创建",
+  "dlg.save": "保存"
 }

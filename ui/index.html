@@ -31,6 +31,14 @@
   <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
   <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M10.8 10.6 12.6 9.4V15" stroke-width="2"/></symbol>
   <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M2 2l20 20M5.8 5.8A7 7 0 0 0 7 19h9.5M21 15.5A4.5 4.5 0 0 0 17.5 10H16a7 7 0 0 0-6.4-4.9"/></symbol>
+  <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20.3s-7.6-4.5-9.4-9.3C1.3 7.6 3.4 4.3 6.9 4.3c2.1 0 3.6 1.2 5.1 3.1 1.5-1.9 3-3.1 5.1-3.1 3.5 0 5.6 3.3 4.3 6.7-1.8 4.8-9.4 9.3-9.4 9.3z"/></symbol>
+  <symbol id="i-heart-f" viewBox="0 0 24 24"><path d="M12 20.3s-7.6-4.5-9.4-9.3C1.3 7.6 3.4 4.3 6.9 4.3c2.1 0 3.6 1.2 5.1 3.1 1.5-1.9 3-3.1 5.1-3.1 3.5 0 5.6 3.3 4.3 6.7-1.8 4.8-9.4 9.3-9.4 9.3z" fill="currentColor"/></symbol>
+  <symbol id="i-new" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6h12M4 11h12M4 16h7"/><circle cx="16.5" cy="17.5" r="2.5"/><path d="M19 17.5V9l2.5-.8"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></g></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6M5.5 6l1 13.2A2 2 0 0 0 8.5 21h7a2 2 0 0 0 2-1.8L18.5 6M10 10.5v6M14 10.5v6"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M13 20h8"/><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7.5 18.5 3 20l1.5-4.5z"/></symbol>
 </svg>
 
 <div class="app" id="app">
@@ -46,6 +54,13 @@
         <button role="tab" data-tab="artists"><svg class="i"><use href="#i-mic"/></svg><span data-i18n="nav.artists"></span><span class="n" id="n-artists"></span></button>
         <button role="tab" data-tab="albums"><svg class="i"><use href="#i-disc"/></svg><span data-i18n="nav.albums"></span><span class="n" id="n-albums"></span></button>
       </nav>
+      <nav class="nav fav-nav" id="favnav">
+        <button type="button" data-tab="fav"><svg class="i"><use href="#i-heart"/></svg><span data-i18n="side.favorites"></span><span class="n" id="n-fav"></span></button>
+      </nav>
+    </div>
+    <div id="plsec">
+      <div class="side-h"><h4 data-i18n="side.playlists"></h4><button class="side-add" id="newpl" type="button" data-i18n-title="playlist.new" data-i18n-aria-label="playlist.new"><svg class="i"><use href="#i-new"/></svg></button></div>
+      <nav class="nav pl-nav" id="plnav"></nav>
     </div>
     <div>
       <h4 data-i18n="side.quality"></h4>
@@ -133,6 +148,27 @@
       </section>
     </div>
   </form>
+</dialog>
+
+<dialog id="namedlg" class="small">
+  <form class="dlg" id="nameform" novalidate>
+    <div class="dlg-head"><h2 id="nametitle"></h2></div>
+    <div class="dlg-body">
+      <input class="field" id="nameinput" type="text" maxlength="100" autocomplete="off" spellcheck="false" data-i18n-placeholder="playlist.namePlaceholder" data-i18n-aria-label="playlist.namePlaceholder">
+      <p class="dlg-err" id="nameerr" role="alert" hidden></p>
+      <div class="dlg-acts"><button class="btn" type="button" id="namecancel" data-i18n="dlg.cancel"></button><button class="btn primary" type="submit" id="nameok"></button></div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="confirmdlg" class="small">
+  <div class="dlg">
+    <div class="dlg-head"><h2 id="confirmtitle"></h2></div>
+    <div class="dlg-body">
+      <p class="dlg-text" id="confirmtext"></p>
+      <div class="dlg-acts"><button class="btn" type="button" id="confirmcancel" data-i18n="dlg.cancel"></button><button class="btn" type="button" id="confirmok"></button></div>
+    </div>
+  </div>
 </dialog>
 
 </body>

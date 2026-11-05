@@ -5,8 +5,11 @@ import { esc, playable, icon } from './util.js';
 import { info } from './library.js';
 import { renderSongs, QUALITIES, qLabel, rootLabel, fullPath, rowHeight } from './views/songs.js';
 import { renderShelf } from './views/shelf.js';
+import { renderPlaylist, defaultPlSort } from './views/playlist.js';
 import { initPlayer, playList, markRows, libraryChanged } from './player.js';
-import { initSettings, openSettings } from './settings.js';
+import { initSettings, openSettings, toast } from './settings.js';
+import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
+import { askName, confirmBox } from './dialogs.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -14,11 +17,15 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* ignore */ } },
 };
 
-const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count' };
+// tab: songs | artists | albums | fav | pl (with pl = playlist id); plSort is the sort on fav / pl pages.
+const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count', pl: null, plSort: null };
+const isPlTab = (tab) => tab === 'fav' || tab === 'pl';
 /** Shared with views and the player / settings modules. */
 export const ctx = {
   state,
   lib: { roots: [], songs: [], scanned_at: null, ffmpeg: false },
+  /** Library songs by id, rebuilt on every library load. */
+  songsById: new Map(),
   caps: { ffmpeg: false },
   nowId: null,
   /** Songs currently shown on the songs page, in display order. */
@@ -31,8 +38,19 @@ export const ctx = {
   /** Plays `list` (already filtered to playable songs) from `start`. */
   playList: (list, start, shuffle) => playList(list, start, shuffle),
   openSettings: () => { closeDrawer(); openSettings(); },
-  /** Goes back to the songs page with the given filters (where a queue was started). */
+  openPlaylist: (id) => openPlaylist(id),
+  /** After a `playlists://changed` (data already re-fetched): update the sidebar and the open page. */
+  playlistsChanged: (c) => playlistsChanged(c),
+  /** Goes back to the page with the given filters (where a queue was started). */
   showSource(c) {
+    if (isPlTab(c.tab)) {
+      if (c.tab === 'pl' && !pl.list.some((p) => p.id === c.pl)) return;
+      try { history.pushState({ tab: c.tab, pl: c.pl }, '', plHash(c.tab, c.pl)); } catch (_) { /* ignore */ }
+      Object.assign(state, { tab: c.tab, pl: c.pl, artist: null, album: null, plSort: c.plSort ? { ...c.plSort } : defaultPlSort(c.tab), q: c.q, open: null });
+      $('q').value = c.q;
+      render();
+      return;
+    }
     try { history.pushState({ artist: c.artist, album: c.album, sort: c.sort, tab: 'songs' }, '', location.pathname); } catch (_) { /* ignore */ }
     Object.assign(state, { tab: 'songs', artist: c.artist, album: c.album, sort: { ...c.sort }, quality: c.quality, root: c.root, q: c.q, open: null });
     $('q').value = c.q;
@@ -47,6 +65,7 @@ document.addEventListener('error', (e) => { if (e.target.tagName === 'IMG' && e.
 async function loadLibrary() {
   const lib = await api.invoke('get_library');
   ctx.lib = { roots: lib.roots || [], songs: lib.songs || [], scanned_at: lib.scanned_at, ffmpeg: !!lib.ffmpeg };
+  ctx.songsById = new Map(ctx.lib.songs.map((s) => [s.id, s]));
   ctx.caps = { ffmpeg: !!lib.ffmpeg };
   ctx.loaded = true;
   if (state.root != null && !ctx.lib.roots.some((r) => r.id === state.root)) state.root = null;
@@ -76,6 +95,15 @@ function sidebar() {
   const offline = roots.filter((r) => !r.online).length;
   $('scanline').innerHTML = (scanned_at ? esc(t('side.lastScan', { time: new Date(scanned_at * 1000).toLocaleString(lang(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) })) : '') +
     (offline ? `<div class="warn">${esc(t('side.offlineFolders', { n: offline }))}</div>` : '');
+  sidebarPl();
+}
+
+/** Liked-songs count and the playlist list. */
+function sidebarPl() {
+  $('n-fav').textContent = pl.favItems.length || '';
+  $('plnav').innerHTML = pl.list.length
+    ? pl.list.map((p) => `<button type="button" data-pl="${p.id}" title="${esc(p.name)}">${icon('list')}<span class="lbl">${esc(p.name)}</span><span class="n">${p.count}</span></button>`).join('')
+    : pl.loaded ? `<p class="side-empty">${esc(t('side.noPlaylists'))}</p><button type="button" class="side-link" data-import>${esc(t('side.importSpotify'))}</button>` : '';
   syncSide();
 }
 
@@ -83,6 +111,10 @@ function syncSide() {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute(b.closest('#mtabs') ? 'aria-pressed' : 'aria-selected', b.dataset.tab === state.tab));
   document.querySelectorAll('#qnav button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.q === state.quality));
   document.querySelectorAll('#rootnav button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.root === (state.root == null ? '' : String(state.root))));
+  document.querySelectorAll('#plnav [data-pl]').forEach((b) => {
+    if (state.tab === 'pl' && +b.dataset.pl === state.pl) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
 }
 
 $('qnav').addEventListener('click', (e) => {
@@ -93,6 +125,12 @@ $('rootnav').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   state.root = b.dataset.root === '' ? null : +b.dataset.root; state.open = null; closeDrawer(); render();
 });
+$('plnav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pl]');
+  if (b) { openPlaylist(+b.dataset.pl); return; }
+  if (e.target.closest('[data-import]')) { closeDrawer(); if (ctx.openImport) ctx.openImport(); else ctx.openSettings(); }
+});
+$('newpl').onclick = () => newPlaylist();
 function closeDrawer() { $('side').classList.remove('open'); $('scrim').classList.remove('open'); }
 $('menubtn').onclick = () => { $('side').classList.add('open'); $('scrim').classList.add('open'); };
 $('scrim').onclick = closeDrawer;
@@ -102,8 +140,8 @@ function render() {
   syncSide();
   $('clearq').hidden = !state.q;
   if (ctx.view && ctx.view.vlist) ctx.view.vlist.destroy();
-  if (state.tab === 'songs') {
-    ctx.view = renderSongs($('view'), ctx);
+  if (state.tab === 'songs' || isPlTab(state.tab)) {
+    ctx.view = (state.tab === 'songs' ? renderSongs : renderPlaylist)($('view'), ctx);
     ctx.list = ctx.view.list;
     markRows();
   } else {
@@ -121,6 +159,18 @@ function toggleOpen(id) {
 $('view').addEventListener('click', (e) => {
   const tg = e.target;
   if (tg.closest('[data-open-settings]')) { ctx.openSettings(); return; }
+  const tgo = tg.closest('[data-tab-go]');
+  if (tgo) { switchTab(tgo.dataset.tabGo); return; }
+  const rn = tg.closest('[data-pl-rename]');
+  if (rn) { renameList(+rn.dataset.plRename); return; }
+  const dl = tg.closest('[data-pl-delete]');
+  if (dl) { removeList(+dl.dataset.plDelete); return; }
+  const ps = tg.closest('[data-psort]');
+  if (ps) {
+    const c = ps.dataset.psort, cur = state.plSort || defaultPlSort(state.tab);
+    state.plSort = { col: c, dir: cur.col === c ? -cur.dir : (c === 's' || c === 'br' || c === 'ad' ? -1 : 1) };
+    render(); return;
+  }
   if (tg.closest('#playall')) { ctx.playList(playableList(), 0, false); return; }
   if (tg.closest('#shuffleall')) { const l = playableList(); ctx.playList(l, Math.floor(Math.random() * l.length), true); return; }
   const ss = tg.closest('#shelfsort [data-v]');
@@ -162,11 +212,14 @@ function go(o) {
 function apply(o) {
   state.artist = o.artist ?? null; state.album = o.album ?? null;
   if (o.sort) state.sort = o.sort;
-  resetSearch(); state.tab = o.tab || 'songs'; state.open = null; render(); window.scrollTo({ top: 0 });
+  resetSearch(); state.tab = o.tab || 'songs'; state.open = null;
+  state.pl = state.tab === 'pl' ? o.pl ?? null : null;
+  state.plSort = isPlTab(state.tab) ? defaultPlSort(state.tab) : null;
+  render(); window.scrollTo({ top: 0 });
 }
 window.addEventListener('popstate', (e) => {
-  const s = e.state || {};
-  apply({ artist: s.artist, album: s.album, tab: s.tab || tabFromHash(), sort: s.sort || { col: 'a', dir: 1 } });
+  const s = e.state || {}, h = fromHash();
+  apply({ artist: s.artist, album: s.album, tab: s.tab || h.tab, pl: s.tab ? s.pl : h.pl, sort: s.sort || { col: 'a', dir: 1 } });
 });
 $('view').addEventListener('dblclick', (e) => {
   const row = e.target.closest('.song'); if (!row || e.target.closest('button,a')) return;
@@ -182,19 +235,73 @@ $('view').addEventListener('keydown', (e) => {
     document.querySelector(`.song[data-id="${CSS.escape(id)}"]`)?.focus();
   }
 });
-function switchTab(tab) {
-  state.tab = tab; state.artist = null; state.album = null; state.open = null;
+/** `replace`: replace the history entry (leaving a page that no longer exists). */
+function switchTab(tab, replace = false) {
+  state.tab = tab; state.artist = null; state.album = null; state.open = null; state.pl = null;
+  state.plSort = isPlTab(tab) ? defaultPlSort(tab) : null;
   if (tab === 'songs') state.sort = { col: 'a', dir: 1 };
-  try { history.pushState({ tab }, '', '#' + tab); } catch (_) { /* ignore */ }
+  try { history[replace ? 'replaceState' : 'pushState']({ tab }, '', '#' + tab); } catch (_) { /* ignore */ }
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
-document.querySelectorAll('#nav,#mtabs').forEach((el) => el.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); }));
+const plHash = (tab, id) => (tab === 'pl' ? '#pl/' + id : '#' + tab);
+function openPlaylist(id) {
+  Object.assign(state, { tab: 'pl', pl: id, artist: null, album: null, open: null, plSort: defaultPlSort('pl') });
+  try { history.pushState({ tab: 'pl', pl: id }, '', plHash('pl', id)); } catch (_) { /* ignore */ }
+  closeDrawer(); render(); window.scrollTo({ top: 0 });
+}
+
+// ---------- playlists: create, rename, delete, change events ----------
+const showErr = (e) => toast(t(errKey(e)), { icon: 'x', autoHide: 6000 });
+
+async function newPlaylist() {
+  closeDrawer();
+  let made = null;
+  const name = await askName({ title: t('playlist.newTitle'), ok: t('dlg.create'), run: async (n) => { made = await createPlaylist(n, []); } });
+  if (name != null && made) openPlaylist(made.id);
+}
+
+async function renameList(id) {
+  const p = pl.list.find((x) => x.id === id);
+  if (!p) return;
+  await askName({ title: t('playlist.renameTitle'), value: p.name, ok: t('dlg.save'), run: (n) => renamePlaylist(id, n) });
+}
+
+async function removeList(id) {
+  const p = pl.list.find((x) => x.id === id);
+  if (!p) return;
+  const yes = await confirmBox({ title: t('playlist.deleteTitle'), text: t('playlist.deleteText', { name: p.name }), ok: t('playlist.delete'), danger: true });
+  if (!yes) return;
+  try {
+    await deletePlaylist(id);
+  } catch (e) { showErr(e); return; }
+  if (state.tab === 'pl' && state.pl === id) switchTab('songs', true);
+  toast(t('playlist.deleted', { name: p.name }), { icon: 'check', autoHide: 3000 });
+}
+
+/** Playlist ids seen so far, to tell "deleted" from "never existed" for the open page. */
+let knownPl = new Set();
+function playlistsChanged(c) {
+  const had = knownPl;
+  knownPl = new Set(pl.list.map((p) => p.id));
+  sidebarPl();
+  if (state.tab === 'pl' && !knownPl.has(state.pl)) {
+    if (had.has(state.pl)) switchTab('songs', true); // deleted (maybe elsewhere)
+    else if (ctx.loaded) render(); // first load: show "not found"
+    return;
+  }
+  const id = state.tab === 'fav' ? FAV : state.tab === 'pl' ? state.pl : null;
+  if (id == null || !ctx.loaded) return; // loadLibrary renders the page
+  if (c.id == null || (id === FAV ? c.favorites : c.id === id)) {
+    loadItems(id).then(() => { if (isPlTab(state.tab)) render(); }, showErr);
+  }
+}
+document.querySelectorAll('#nav,#mtabs,#favnav').forEach((el) => el.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); }));
 function resetSearch() { $('q').value = ''; state.q = ''; }
 let qt;
 $('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; state.open = null; render(); }, 120); });
 $('clearq').onclick = () => { resetSearch(); render(); $('q').focus(); };
 document.addEventListener('keydown', (e) => {
-  const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open;
+  const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open || $('namedlg').open || $('confirmdlg').open;
   if (e.key === '/' && !typing) { e.preventDefault(); $('q').focus(); }
   if (e.key === 'Escape') closeDrawer();
 });
@@ -205,7 +312,11 @@ matchMedia('(max-width:760px)').addEventListener('change', () => { if (ctx.view)
 // ---------- top bar actions (the refresh button is wired in settings.js) ----------
 $('opensettings').onclick = () => ctx.openSettings();
 
-function tabFromHash() { const h = location.hash.slice(1); return ['songs', 'artists', 'albums'].includes(h) ? h : 'songs'; }
+function fromHash() {
+  const h = location.hash.slice(1), m = /^pl\/(\d+)$/.exec(h);
+  if (m) return { tab: 'pl', pl: +m[1] };
+  return { tab: ['songs', 'artists', 'albums', 'fav'].includes(h) ? h : 'songs', pl: null };
+}
 
 // ---------- boot ----------
 async function boot() {
@@ -214,10 +325,14 @@ async function boot() {
   await initI18n(isMock ? qs.get('lang') || undefined : undefined);
   applyI18n();
   state.shelfSort = store.get('shelfSort', 'count');
-  state.tab = tabFromHash();
+  const h = fromHash();
+  state.tab = h.tab; state.pl = h.pl;
+  state.plSort = isPlTab(state.tab) ? defaultPlSort(state.tab) : null;
   initSettings(ctx, { loadLibrary });
+  const plReady = initPlaylists(ctx);
   try {
     await loadLibrary();
+    await plReady;
   } catch (e) {
     $('view').innerHTML = `<div class="empty">${icon('disc')}<h2>${esc(t('error.loadTitle'))}</h2><p>${esc(String(e && e.message || e))}</p></div>`;
     return;
