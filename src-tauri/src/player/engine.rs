@@ -27,15 +27,16 @@ enum Cmd {
     Load { path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool, epoch: u64 },
     Play,
     Pause,
-    Seek(f64),
+    Seek(f64, u64),
     Volume(f32),
     Stop,
 }
 
 pub struct Engine {
     tx: mpsc::Sender<Cmd>,
-    /// bumped by every load/stop; events of an older track are dropped, so an `Ended`
-    /// racing with a newer `load` cannot skip the new song
+    /// bumped by every load/seek/stop. The engine thread drops events of an older epoch,
+    /// and every event carries its epoch so the receiver can re-check under its own lock
+    /// (an event already emitted may still race a newer `load`).
     epoch: Arc<AtomicU64>,
 }
 
@@ -46,7 +47,9 @@ const CHUNKS_PER_SEC: usize = 10;
 const PREFETCH_CHUNKS: usize = 40;
 
 impl Engine {
-    pub fn spawn(on_event: Box<dyn Fn(EngineEvent) + Send>) -> Engine {
+    /// `on_event(epoch, event)`: `epoch` is the value returned by the `load`/`seek` that
+    /// started the track the event belongs to (0 for engine-level events at startup).
+    pub fn spawn(on_event: Box<dyn Fn(u64, EngineEvent) + Send>) -> Engine {
         let (tx, rx) = mpsc::channel();
         let epoch = Arc::new(AtomicU64::new(0));
         let ep = epoch.clone();
@@ -56,9 +59,11 @@ impl Engine {
         }
         Engine { tx, epoch }
     }
-    pub fn load(&self, path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool) {
-        let epoch = self.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    /// Returns the new epoch; events for this track carry it.
+    pub fn load(&self, path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool) -> u64 {
+        let epoch = self.bump();
         self.send(Cmd::Load { path, start_ms, end_ms, autoplay, epoch });
+        epoch
     }
     pub fn play(&self) {
         self.send(Cmd::Play);
@@ -67,16 +72,24 @@ impl Engine {
         self.send(Cmd::Pause);
     }
     /// `secs` from the start of the song (segment).
-    pub fn seek(&self, secs: f64) {
-        self.send(Cmd::Seek(secs));
+    /// Returns the new epoch (positions from before the seek are stale).
+    pub fn seek(&self, secs: f64) -> u64 {
+        let epoch = self.bump();
+        self.send(Cmd::Seek(secs, epoch));
+        epoch
     }
     /// 0..1 (applied as v², which sounds more linear)
     pub fn set_volume(&self, v: f32) {
         self.send(Cmd::Volume(v));
     }
-    pub fn stop(&self) {
-        self.epoch.fetch_add(1, Ordering::SeqCst);
+    /// Returns the new epoch.
+    pub fn stop(&self) -> u64 {
+        let epoch = self.bump();
         self.send(Cmd::Stop);
+        epoch
+    }
+    fn bump(&self) -> u64 {
+        self.epoch.fetch_add(1, Ordering::SeqCst) + 1
     }
     fn send(&self, c: Cmd) {
         // a dead engine thread must not take the app down
@@ -283,12 +296,12 @@ fn open_output() -> Option<(OutputStream, OutputStreamHandle)> {
     }
 }
 
-fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEvent) + Send>) {
-    let emit = |e| on_event(e);
+fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, EngineEvent) + Send>) {
+    let emit = |ep: u64, e| on_event(ep, e);
     let current = |t: &Track| t.epoch == epoch.load(Ordering::SeqCst);
     let mut output = open_output();
     if output.is_none() {
-        emit(EngineEvent::NoOutput);
+        emit(0, EngineEvent::NoOutput);
     }
     let mut volume: f32 = 1.0;
     let mut track: Option<Track> = None;
@@ -302,7 +315,7 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
                     output = open_output(); // a device may have been plugged in since
                 }
                 if output.is_none() {
-                    emit(EngineEvent::NoOutput);
+                    emit(ep, EngineEvent::NoOutput);
                     continue;
                 }
                 let mut t = Track {
@@ -336,8 +349,9 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
                     }
                 }
             }
-            Ok(Cmd::Seek(secs)) => {
+            Ok(Cmd::Seek(secs, ep)) => {
                 if let Some(t) = track.as_mut() {
+                    t.epoch = ep;
                     t.restart(if secs.is_finite() { secs.max(0.0) } else { 0.0 });
                 }
             }
@@ -354,8 +368,9 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
 
         let Some(t) = track.as_mut() else { continue };
         if !current(t) {
-            continue; // superseded by a queued load/stop
+            continue; // superseded by a queued load/seek/stop
         }
+        let ep = t.epoch;
 
         // decoder opened?
         if let Some((hdr, _)) = &t.pending {
@@ -369,7 +384,7 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
                 Ok(h) => h,
                 Err(e) => {
                     track = None;
-                    emit(EngineEvent::Error(e));
+                    emit(ep, EngineEvent::Error(e));
                     continue;
                 }
             };
@@ -379,7 +394,7 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
                     eprintln!("linger: cannot open an output sink");
                     output = None;
                     track = None;
-                    emit(EngineEvent::NoOutput);
+                    emit(ep, EngineEvent::NoOutput);
                     continue;
                 }
             };
@@ -407,7 +422,7 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
         let err = t.shared.error.lock().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(e) = err {
             track = None;
-            emit(EngineEvent::Error(e));
+            emit(ep, EngineEvent::Error(e));
             continue;
         }
         if t.shared.ended.load(Ordering::SeqCst) {
@@ -416,14 +431,14 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(EngineEven
             }
             let pos = t.position();
             track = None;
-            emit(EngineEvent::Position(pos));
-            emit(EngineEvent::Ended);
+            emit(ep, EngineEvent::Position(pos));
+            emit(ep, EngineEvent::Ended);
             continue;
         }
         if t.playing && t.sink.is_some() && last_pos.elapsed() >= POS_EVERY {
             last_pos = Instant::now();
             if t.shared.played.load(Ordering::Relaxed) > 0 {
-                emit(EngineEvent::Position(t.position()));
+                emit(ep, EngineEvent::Position(t.position()));
             }
         }
     }

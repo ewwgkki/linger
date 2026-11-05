@@ -17,7 +17,7 @@ fn main() {
         std::process::exit(2);
     }
     let (tx, rx) = mpsc::channel();
-    let engine = Engine::spawn(Box::new(move |ev| {
+    let engine = Engine::spawn(Box::new(move |_epoch, ev| {
         let _ = tx.send(ev);
     }));
     engine.set_volume(0.5);

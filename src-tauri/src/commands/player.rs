@@ -101,6 +101,14 @@ struct Inner {
     failures: usize,
     /// bumped by every user action / load; a pending error-skip only fires if unchanged
     gen: u64,
+    /// engine epoch of the track we expect events from (from the last load/seek/stop)
+    epoch: u64,
+}
+
+impl Inner {
+    fn new(queue: Queue, volume: u8) -> Inner {
+        Inner { queue, id: None, playing: false, loaded: false, pos: 0.0, dur: 0.0, volume, failures: 0, gen: 0, epoch: 0 }
+    }
 }
 
 impl Player {
@@ -112,17 +120,7 @@ impl Player {
         queue.set_repeat(repeat);
         Player {
             engine: OnceLock::new(),
-            inner: Mutex::new(Inner {
-                queue,
-                id: None,
-                playing: false,
-                loaded: false,
-                pos: 0.0,
-                dur: 0.0,
-                volume,
-                failures: 0,
-                gen: 0,
-            }),
+            inner: Mutex::new(Inner::new(queue, volume)),
         }
     }
     fn inner(&self) -> MutexGuard<'_, Inner> {
@@ -133,13 +131,19 @@ impl Player {
             f(e);
         }
     }
+    /// Runs an epoch-changing engine call (load/seek/stop) and remembers the new epoch.
+    fn retarget(&self, i: &mut Inner, f: impl FnOnce(&Engine) -> u64) {
+        if let Some(e) = self.engine.get() {
+            i.epoch = f(e);
+        }
+    }
 }
 
 /// Starts the audio engine; call once after `AppState` is managed.
 pub fn init(app: &AppHandle) {
     let state = app.state::<AppState>();
     let h = app.clone();
-    let engine = Engine::spawn(Box::new(move |ev| handle_event(&h, ev)));
+    let engine = Engine::spawn(Box::new(move |epoch, ev| handle_event(&h, epoch, ev)));
     engine.set_volume(state.player.inner().volume as f32 / 100.0);
     let _ = state.player.engine.set(engine);
 }
@@ -174,7 +178,7 @@ fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool
     let Some(id) = i.id.clone() else {
         i.playing = false;
         i.loaded = false;
-        state.player.with_engine(|e| e.stop());
+        state.player.retarget(i, |e| e.stop());
         return;
     };
     let found = {
@@ -192,7 +196,7 @@ fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool
     i.dur = song.duration;
     i.playing = autoplay;
     i.loaded = true;
-    state.player.with_engine(|e| e.load(path, song.start_ms, song.end_ms, autoplay));
+    state.player.retarget(i, |e| e.load(path, song.start_ms, song.end_ms, autoplay));
 }
 
 /// A song could not be played: report it, then skip after 1.2 s or stop.
@@ -229,38 +233,71 @@ fn fail(app: &AppHandle, i: &mut Inner, e: DecodeError) {
     }
 }
 
-fn handle_event(app: &AppHandle, ev: EngineEvent) {
-    let state = app.state::<AppState>();
-    let mut i = state.player.inner();
+/// What `handle_event` must do after the state update in `apply_event`.
+#[derive(Debug, Clone, PartialEq)]
+enum Effect {
+    /// stale event (an older track, or from before a seek): nothing changed
+    Ignore,
+    Pos(f64),
+    /// the queue advanced: load its current song
+    Load,
+    /// the queue ran out
+    Stopped,
+    Fail(DecodeError),
+    NoOutput,
+}
+
+/// The state part of event handling, run under the `inner` lock. Events whose epoch is not
+/// the one of our last load/seek/stop are dropped here: an engine thread may emit an event
+/// for track A just before a user `next` (holding the lock) loads B.
+fn apply_event(i: &mut Inner, epoch: u64, ev: EngineEvent) -> Effect {
+    if epoch != i.epoch {
+        return Effect::Ignore;
+    }
     match ev {
         EngineEvent::Position(pos) => {
             i.pos = pos;
             i.failures = 0; // audio is actually coming out
-            let _ = app.emit("player://pos", PosEvent { pos });
+            Effect::Pos(pos)
         }
         EngineEvent::Ended => {
             i.failures = 0;
             if i.queue.next(true).is_some() {
-                load_current(app, &state, &mut i, true);
+                Effect::Load
             } else {
                 // end of the queue: keep the last song shown, stopped at its start
                 i.playing = false;
                 i.loaded = false;
                 i.pos = 0.0;
+                Effect::Stopped
             }
-            emit_state(app, &i);
         }
-        EngineEvent::Error(e) => {
-            fail(app, &mut i, e);
-            emit_state(app, &i);
-        }
+        EngineEvent::Error(e) => Effect::Fail(e),
         EngineEvent::NoOutput => {
-            let _ = app.emit("player://error", ErrorEvent { id: i.id.clone(), reason: NO_OUTPUT });
             i.playing = false;
             i.loaded = false;
-            emit_state(app, &i);
+            Effect::NoOutput
         }
     }
+}
+
+fn handle_event(app: &AppHandle, epoch: u64, ev: EngineEvent) {
+    let state = app.state::<AppState>();
+    let mut i = state.player.inner();
+    match apply_event(&mut i, epoch, ev) {
+        Effect::Ignore => return,
+        Effect::Pos(pos) => {
+            let _ = app.emit("player://pos", PosEvent { pos });
+            return;
+        }
+        Effect::Load => load_current(app, &state, &mut i, true),
+        Effect::Stopped => {}
+        Effect::Fail(e) => fail(app, &mut i, e),
+        Effect::NoOutput => {
+            let _ = app.emit("player://error", ErrorEvent { id: i.id.clone(), reason: NO_OUTPUT });
+        }
+    }
+    emit_state(app, &i);
 }
 
 #[tauri::command]
@@ -315,7 +352,7 @@ pub fn player_prev(app: AppHandle, state: State<'_, AppState>) {
     if i.loaded && i.pos > PREV_RESTART_SECS {
         i.gen += 1;
         i.pos = 0.0;
-        state.player.with_engine(|e| e.seek(0.0));
+        state.player.retarget(&mut i, |e| e.seek(0.0));
     } else {
         if i.queue.prev().is_none() {
             return;
@@ -343,7 +380,7 @@ pub fn player_seek(secs: f64, app: AppHandle, state: State<'_, AppState>) {
     }
     i.gen += 1;
     i.pos = secs;
-    state.player.with_engine(|e| e.seek(secs));
+    state.player.retarget(&mut i, |e| e.seek(secs));
     emit_state(&app, &i);
 }
 
@@ -426,6 +463,49 @@ mod tests {
         assert_eq!(load_settings(&db), (true, Repeat::Off, 100));
         let p = Player::new(&db);
         assert!(p.inner().queue.shuffle());
+    }
+
+    fn inner_with(n: usize, epoch: u64) -> Inner {
+        let mut q = Queue::new(1);
+        q.play_list((0..n).map(|k| format!("s{k}")).collect(), 0, false);
+        let mut i = Inner::new(q, 100);
+        i.id = Some("s0".into());
+        i.playing = true;
+        i.loaded = true;
+        i.epoch = epoch;
+        i
+    }
+
+    #[test]
+    fn stale_events_are_ignored() {
+        // track A (epoch 1) ended, but the user's `next` already loaded B (epoch 2)
+        let mut i = inner_with(3, 1);
+        i.queue.next(false);
+        i.epoch = 2;
+        i.pos = 1.5;
+        i.failures = 2;
+        assert_eq!(apply_event(&mut i, 1, EngineEvent::Ended), Effect::Ignore);
+        assert_eq!(i.queue.current(), Some("s1"), "queue must not advance past the user's pick");
+        assert_eq!(apply_event(&mut i, 1, EngineEvent::Error(DecodeError::NotFound)), Effect::Ignore);
+        assert_eq!(apply_event(&mut i, 1, EngineEvent::Position(99.0)), Effect::Ignore);
+        assert_eq!(apply_event(&mut i, 1, EngineEvent::NoOutput), Effect::Ignore);
+        assert_eq!((i.pos, i.failures, i.playing, i.loaded), (1.5, 2, true, true));
+        // events of the current track still apply
+        assert_eq!(apply_event(&mut i, 2, EngineEvent::Position(3.0)), Effect::Pos(3.0));
+        assert_eq!((i.pos, i.failures), (3.0, 0));
+        assert_eq!(apply_event(&mut i, 2, EngineEvent::Ended), Effect::Load);
+        assert_eq!(i.queue.current(), Some("s2"));
+        assert_eq!(apply_event(&mut i, 2, EngineEvent::Error(DecodeError::NotFound)), Effect::Fail(DecodeError::NotFound));
+    }
+
+    #[test]
+    fn ended_at_queue_end_stops() {
+        let mut i = inner_with(1, 4);
+        assert_eq!(apply_event(&mut i, 4, EngineEvent::Ended), Effect::Stopped);
+        assert_eq!((i.playing, i.loaded, i.pos, i.queue.current()), (false, false, 0.0, Some("s0")));
+        let mut i = inner_with(1, 4);
+        assert_eq!(apply_event(&mut i, 4, EngineEvent::NoOutput), Effect::NoOutput);
+        assert!(!i.playing && !i.loaded);
     }
 
     fn test_song(root_id: i64, rel: &str) -> SongRow {
