@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { esc, mmss, norm, fmtLabel, quality, playable, coverUrl, hm } from '../js/util.js';
+import { esc, mmss, norm, fmtLabel, quality, playable, coverUrl, hm, applyOnline, trackSlider, DRAG_END } from '../js/util.js';
 import { setMessages } from '../js/i18n.js';
 
 test('fmtLabel', () => {
@@ -28,6 +28,58 @@ test('playable', () => {
   assert.equal(playable({ c: 'wma', av: true }, { ffmpeg: true }), true);
   assert.equal(playable({ c: 'mp3', av: false }, { ffmpeg: true }), false);
   assert.equal(playable({ c: 'flac', av: true }, { ffmpeg: false }), true);
+});
+
+test('opus needs FFmpeg (symphonia 0.5 has no Opus decoder)', () => {
+  assert.equal(playable({ c: 'opus', f: 'opus', av: true }, { ffmpeg: false }), false);
+  assert.equal(playable({ c: 'opus', f: 'ogg', av: true }, { ffmpeg: false }), false);
+  assert.equal(playable({ c: 'opus', av: true }, { ffmpeg: true }), true);
+  assert.equal(playable({ c: 'ogg', av: true }, { ffmpeg: false }), true);
+});
+
+test('applyOnline recomputes av from the folders online flags', () => {
+  const songs = [{ id: 'a', r: 1, av: true }, { id: 'b', r: 2, av: true }, { id: 'c', r: 3, av: false }, { id: 'd', r: 9, av: true }];
+  const roots = [{ id: 1, online: true }, { id: 2, online: false }, { id: 3, online: true }];
+  assert.equal(applyOnline(songs, roots), true);
+  assert.deepEqual(songs.map((s) => s.av), [true, false, true, true]); // r 9 not listed: untouched
+  assert.equal(applyOnline(songs, roots), false, 'nothing changes the second time');
+  assert.equal(applyOnline([], roots), false);
+});
+
+function fakeSlider(value) {
+  const el = new EventTarget();
+  el.value = String(value);
+  el.fire = (type) => el.dispatchEvent(new Event(type));
+  return el;
+}
+
+test('trackSlider: a drag back to its start value still ends (no change event)', () => {
+  for (const ender of DRAG_END.filter((e) => e !== 'change')) {
+    const el = fakeSlider(50), ends = [];
+    const d = trackSlider(el, { preview() {}, end: (v) => ends.push(v), current: () => 50 });
+    assert.equal(d.dragging(), false);
+    el.value = '70'; el.fire('input');
+    assert.equal(d.dragging(), true);
+    el.value = '50'; el.fire('input');
+    el.fire(ender); // the browser fires no `change` here
+    assert.equal(d.dragging(), false, ender);
+    assert.deepEqual(ends, [null], `${ender}: nothing to commit`);
+  }
+});
+
+test('trackSlider: commits a changed value exactly once', () => {
+  const el = fakeSlider(10), ends = [], previews = [];
+  const d = trackSlider(el, { preview: (v) => previews.push(v), end: (v) => ends.push(v), current: () => 10 });
+  el.value = '30'; el.fire('input');
+  el.value = '40'; el.fire('input');
+  el.fire('pointerup');
+  el.fire('change');
+  el.fire('blur');
+  assert.deepEqual(previews, [30, 40]);
+  assert.deepEqual(ends, [40]);
+  assert.equal(d.dragging(), false);
+  el.fire('keyup'); // no drag in progress: ignored
+  assert.deepEqual(ends, [40]);
 });
 
 test('esc, mmss, norm as in the web version', () => {

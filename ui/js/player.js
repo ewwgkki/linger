@@ -2,7 +2,7 @@
 // `player://state` / `player://pos` and sends commands.
 import { t } from './i18n.js';
 import { api } from './api.js';
-import { esc, mmss } from './util.js';
+import { esc, mmss, trackSlider } from './util.js';
 import { art, badges, artistName } from './views/songs.js';
 
 const $ = (id) => document.getElementById(id);
@@ -14,10 +14,10 @@ let ctx = null;
 let ps = { id: null, playing: false, pos: 0, dur: 0, shuffle: false, repeat: 'all', volume: 100 };
 /** The songs-page filters the current queue was started from (for revealNow(true)). */
 let source = null;
-let seeking = false;
+let seekDrag = { dragging: () => false };
 /** Ignore `player://pos` briefly after a seek: events already in flight carry the old spot. */
 let holdPosUntil = 0;
-let volDragging = false;
+let volDrag = { dragging: () => false };
 let errId = null, errTimer = 0;
 
 export const playerState = () => ps;
@@ -73,9 +73,9 @@ function applyState(st) {
   rb.title = t(REPEAT_KEY[rep]);
   rb.setAttribute('aria-label', t(REPEAT_KEY[rep]));
   $('repicon').setAttribute('href', rep === 'one' ? '#i-repeat-one' : '#i-repeat');
-  if (!volDragging) showVolume(ps.volume);
+  if (!volDrag.dragging()) showVolume(ps.volume);
   $('tdur').textContent = mmss(ps.dur);
-  if (!seeking) showPos(ps.pos);
+  if (!seekDrag.dragging()) showPos(ps.pos);
   if (ps.id !== prevId) {
     renderNow();
     markRows();
@@ -158,32 +158,41 @@ export function initPlayer(c) {
   $('shuffle').onclick = () => call('player_set_shuffle', { on: !ps.shuffle });
   $('repeat').onclick = () => call('player_set_repeat', { mode: REPEAT_NEXT[ps.repeat] || 'all' });
 
+  // slider position of the playing spot (what showPos would set)
+  const seekValue = () => (ps.dur ? Math.round(Math.min(1000, Math.max(0, (ps.pos / ps.dur) * 1000))) : 0);
   const seek = $('seek');
-  seek.addEventListener('input', () => {
-    seeking = true;
-    seek.style.setProperty('--p', seek.value / 10 + '%');
-    $('tcur').textContent = mmss((seek.value / 1000) * (ps.dur || 0));
-  });
-  seek.addEventListener('change', () => {
-    const secs = (seek.value / 1000) * (ps.dur || 0);
-    seeking = false;
-    holdPosUntil = performance.now() + 600;
-    showPos(secs);
-    if (ps.dur) call('player_seek', { secs });
+  seekDrag = trackSlider(seek, {
+    current: seekValue,
+    preview(v) {
+      seek.style.setProperty('--p', v / 10 + '%');
+      $('tcur').textContent = mmss((v / 1000) * (ps.dur || 0));
+    },
+    end(v) {
+      if (v == null) { showPos(ps.pos); return; } // dragged back to where it started
+      const secs = (v / 1000) * (ps.dur || 0);
+      holdPosUntil = performance.now() + 600;
+      showPos(secs);
+      if (ps.dur) call('player_seek', { secs });
+    },
   });
 
   let volTimer = 0;
+  /** last volume sent during this drag (its player://state may not be back yet) */
+  let volSent = null;
   const vol = $('vol');
-  vol.addEventListener('input', () => {
-    volDragging = true;
-    showVolume(+vol.value);
-    clearTimeout(volTimer);
-    volTimer = setTimeout(() => call('player_set_volume', { volume: +vol.value }), 80);
-  });
-  vol.addEventListener('change', () => {
-    clearTimeout(volTimer);
-    volDragging = false;
-    call('player_set_volume', { volume: +vol.value });
+  volDrag = trackSlider(vol, {
+    current: () => (volSent ?? ps.volume),
+    preview(v) {
+      showVolume(v);
+      clearTimeout(volTimer);
+      volTimer = setTimeout(() => { volSent = v; call('player_set_volume', { volume: v }); }, 80);
+    },
+    end(v) {
+      clearTimeout(volTimer);
+      volSent = null;
+      if (v == null) showVolume(ps.volume);
+      else call('player_set_volume', { volume: v });
+    },
   });
 
   document.addEventListener('keydown', (e) => {
@@ -197,7 +206,7 @@ export function initPlayer(c) {
 
   api.listen('player://state', applyState);
   api.listen('player://pos', ({ pos }) => {
-    if (seeking || performance.now() < holdPosUntil) return;
+    if (seekDrag.dragging() || performance.now() < holdPosUntil) return;
     ps.pos = pos;
     showPos(pos);
     if (errId && errId !== ps.id) hideError();

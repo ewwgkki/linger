@@ -28,9 +28,49 @@ export function quality(s) {
   return LOSSLESS.includes(s.c) ? 'lossless' : s.br >= 250 ? 'high' : s.br >= 160 ? 'std' : 'low';
 }
 
-/** Needs FFmpeg for WMA/APE; songs in an unreachable folder are never playable. */
+/** Codecs the built-in decoder lacks (symphonia 0.5 has no WMA, APE or Opus decoder). */
+const NEED_FFMPEG = ['wma', 'ape', 'opus'];
+
+/** Needs FFmpeg for WMA/APE/Opus; songs in an unreachable folder are never playable. */
 export function playable(s, caps) {
-  return !!s.av && (!!(caps && caps.ffmpeg) || !['wma', 'ape'].includes(s.c));
+  return !!s.av && (!!(caps && caps.ffmpeg) || !NEED_FFMPEG.includes(s.c));
+}
+
+/**
+ * Sets each song's `av` from its folder's online flag. Returns true if any song changed.
+ * Songs of folders not in `roots` are left as they are.
+ */
+export function applyOnline(songs, roots) {
+  const on = new Map(roots.map((r) => [r.id, !!r.online]));
+  let changed = false;
+  for (const s of songs) {
+    if (!on.has(s.r)) continue;
+    const av = on.get(s.r);
+    if (s.av !== av) { s.av = av; changed = true; }
+  }
+  return changed;
+}
+
+/** Events that end a slider drag. `change` alone is not enough: a drag that returns to its start value fires none. */
+export const DRAG_END = ['change', 'pointerup', 'pointercancel', 'blur', 'keyup'];
+
+/**
+ * Range-input drag that cannot get stuck. `input` starts it (and calls `preview(v)`);
+ * any DRAG_END event ends it once, calling `end(v)` with the final value if it differs from
+ * `current()` (the value already in effect), else `end(null)`. `dragging()` tells whether
+ * a drag is in progress (to ignore outside updates meanwhile).
+ */
+export function trackSlider(el, { preview, end, current }) {
+  let active = false;
+  el.addEventListener('input', () => { active = true; preview(+el.value); });
+  const finish = () => {
+    if (!active) return;
+    active = false;
+    const v = +el.value;
+    end(v !== current() ? v : null);
+  };
+  for (const ev of DRAG_END) el.addEventListener(ev, finish);
+  return { dragging: () => active };
 }
 
 let fallbackCover = null;

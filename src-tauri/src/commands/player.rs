@@ -1,7 +1,8 @@
 //! Player commands and events. The queue lives here (not in the webview) so media keys and
 //! the tray (P4) drive the same state.
 //!
-//! Events: "player://state" PlayerStateDto, "player://pos" { pos }, "player://error" { id, reason }.
+//! Events: "player://state" PlayerStateDto, "player://pos" { pos }, "player://error" { id, reason },
+//! "library://online" Vec<RootDto> (a folder found unreachable while playing).
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -17,6 +18,10 @@ use crate::player::queue::{Queue, Repeat};
 use crate::state::AppState;
 
 const SKIP_DELAY: Duration = Duration::from_millis(1200);
+/// Consecutive failures after which error-skipping gives up.
+const MAX_FAILURES: usize = 3;
+/// Same cap as the scan's folder probe.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// `prev` past this point restarts the song instead
 const PREV_RESTART_SECS: f64 = 4.0;
 
@@ -26,9 +31,10 @@ pub enum ErrorAction {
     SkipAfter(Duration),
 }
 
-/// `failures`: consecutive failures including this one.
+/// `failures`: consecutive failures including this one. Stops after 3 in a row (or once every
+/// song of a shorter queue failed), so a dropped NAS does not skip through a 900-song queue.
 pub fn on_error(failures: usize, queue_len: usize) -> ErrorAction {
-    if failures >= queue_len {
+    if failures >= MAX_FAILURES.min(queue_len) {
         ErrorAction::Stop
     } else {
         ErrorAction::SkipAfter(SKIP_DELAY)
@@ -46,6 +52,11 @@ pub fn error_reason(e: &DecodeError) -> &'static str {
     }
 }
 const NO_OUTPUT: &str = "player.noOutput";
+
+/// Errors that may mean the song's folder (e.g. a NAS share) dropped: re-probe it.
+pub fn should_probe(e: &DecodeError) -> bool {
+    matches!(e, DecodeError::NotFound | DecodeError::Io(_))
+}
 
 /// The root's path joined with the '/'-separated relative path.
 pub fn song_path(roots: &[Root], s: &SongRow) -> Option<PathBuf> {
@@ -199,38 +210,74 @@ fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool
     state.player.retarget(i, |e| e.load(path, song.start_ms, song.end_ms, autoplay));
 }
 
-/// A song could not be played: report it, then skip after 1.2 s or stop.
+/// A song could not be played: report it, then skip after 1.2 s or stop. On a not-found / IO
+/// error the song's folder is re-probed first (off the player lock); if it is unreachable,
+/// playback stops right away and the folder is marked offline.
 fn fail(app: &AppHandle, i: &mut Inner, e: DecodeError) {
     eprintln!("linger: cannot play {:?}: {e}", i.id);
     let _ = app.emit("player://error", ErrorEvent { id: i.id.clone(), reason: error_reason(&e) });
     i.loaded = false;
     i.failures += 1;
-    match on_error(i.failures, i.queue.len()) {
-        ErrorAction::Stop => {
-            i.playing = false;
-            i.failures = 0;
-        }
-        ErrorAction::SkipAfter(d) => {
-            let gen = i.gen;
-            let app = app.clone();
-            let _ = std::thread::Builder::new().name("linger-skip".into()).spawn(move || {
-                std::thread::sleep(d);
-                let state = app.state::<AppState>();
+    let action = on_error(i.failures, i.queue.len());
+    if action == ErrorAction::Stop {
+        i.playing = false;
+        i.failures = 0;
+    }
+    let probe = should_probe(&e).then(|| i.id.clone()).flatten();
+    if probe.is_none() && action == ErrorAction::Stop {
+        return;
+    }
+    let gen = i.gen;
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("linger-skip".into()).spawn(move || {
+        let started = std::time::Instant::now();
+        let state = app.state::<AppState>();
+        if let Some(id) = probe {
+            if probe_song_root(&app, &state, &id) == Some(false) {
                 let mut i = state.player.inner();
-                if i.gen != gen {
-                    return; // the user did something else meanwhile
-                }
-                // under repeat-one a broken song must not retry itself
-                let auto = i.queue.repeat() != Repeat::One;
-                if i.queue.next(auto).is_some() {
-                    load_current(&app, &state, &mut i, true);
-                } else {
+                if i.gen == gen && i.playing {
                     i.playing = false;
+                    i.failures = 0;
+                    emit_state(&app, &i);
                 }
-                emit_state(&app, &i);
-            });
+                return;
+            }
+        }
+        let ErrorAction::SkipAfter(d) = action else { return };
+        std::thread::sleep(d.saturating_sub(started.elapsed()));
+        let mut i = state.player.inner();
+        if i.gen != gen {
+            return; // the user did something else meanwhile
+        }
+        // under repeat-one a broken song must not retry itself
+        let auto = i.queue.repeat() != Repeat::One;
+        if i.queue.next(auto).is_some() {
+            load_current(&app, &state, &mut i, true);
+        } else {
+            i.playing = false;
+        }
+        emit_state(&app, &i);
+    });
+}
+
+/// Probes the folder of song `id` (≤ 3 s, no locks held). Returns Some(false) when it is
+/// unreachable; it is then marked offline and "library://online" (the roots list, same payload
+/// as "library://roots") is emitted. Not "library://roots": the UI reads that as a scan start.
+fn probe_song_root(app: &AppHandle, state: &AppState, id: &str) -> Option<bool> {
+    let root = {
+        let db = state.db();
+        let song = db.song(id).ok().flatten()?;
+        db.roots().ok()?.into_iter().find(|r| r.id == song.root_id)?
+    };
+    if crate::scan::root_online(std::path::Path::new(&root.path), PROBE_TIMEOUT) {
+        return Some(true);
+    }
+    if state.mark_offline(root.id) {
+        if let Ok(dto) = crate::commands::library::roots_dto(&state.db(), &state.online()) {
+            let _ = app.emit("library://online", dto);
         }
     }
+    Some(false)
 }
 
 /// What `handle_event` must do after the state update in `apply_event`.
@@ -433,6 +480,23 @@ mod tests {
     }
 
     #[test]
+    fn long_queue_stops_after_three_failures() {
+        assert_eq!(on_error(1, 900), ErrorAction::SkipAfter(Duration::from_millis(1200)));
+        assert_eq!(on_error(2, 900), ErrorAction::SkipAfter(Duration::from_millis(1200)));
+        assert_eq!(on_error(3, 900), ErrorAction::Stop);
+        assert_eq!(on_error(4, 900), ErrorAction::Stop);
+    }
+
+    #[test]
+    fn io_and_not_found_reprobe_the_folder() {
+        assert!(should_probe(&DecodeError::NotFound));
+        assert!(should_probe(&DecodeError::Io("x".into())));
+        assert!(!should_probe(&DecodeError::NeedFfmpeg));
+        assert!(!should_probe(&DecodeError::Unsupported));
+        assert!(!should_probe(&DecodeError::Corrupt("x".into())));
+    }
+
+    #[test]
     fn reasons_are_i18n_keys() {
         assert_eq!(error_reason(&DecodeError::NotFound), "player.notFound");
         assert_eq!(error_reason(&DecodeError::NeedFfmpeg), "player.needFfmpeg");
@@ -511,6 +575,6 @@ mod tests {
     fn test_song(root_id: i64, rel: &str) -> SongRow {
         SongRow { id: "x".into(), root_id, file_id: 1, rel: rel.into(), ext: "flac".into(), codec: "flac".into(),
             bitrate: 0, size: 0, cover: 0, title: String::new(), artist: String::new(), album: String::new(),
-            track: 0, start_ms: 0, end_ms: None, duration: 0.0 }
+            track: 0, start_ms: 0, end_ms: None, duration: 0.0, mtime: 0 }
     }
 }

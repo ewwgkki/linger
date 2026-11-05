@@ -31,6 +31,13 @@ impl AppState {
     pub fn online(&self) -> HashSet<i64> {
         self.online.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
+    pub fn is_online(&self, id: i64) -> bool {
+        self.online.read().unwrap_or_else(|e| e.into_inner()).contains(&id)
+    }
+    /// Marks one root unreachable; returns true if it was online.
+    pub fn mark_offline(&self, id: i64) -> bool {
+        self.online.write().unwrap_or_else(|e| e.into_inner()).remove(&id)
+    }
     pub fn set_online(&self, ids: HashSet<i64>) {
         *self.online.write().unwrap_or_else(|e| e.into_inner()) = ids;
     }

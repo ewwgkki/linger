@@ -130,15 +130,16 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Returns straight from the database; never touches the network.
-#[tauri::command]
+/// Returns straight from the database; never touches the network. Async: building and
+/// serializing a large library must not block the main thread.
+#[tauri::command(async)]
 pub fn get_library(state: State<'_, AppState>) -> Result<LibraryDto, String> {
     let online = state.online();
     let ffmpeg = crate::ffmpeg::find_ffmpeg().is_some();
     library_dto(&state.db(), &online, ffmpeg).map_err(err)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_roots(paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<RootDto>, String> {
     let db = state.db();
     let mut online = state.online();
@@ -150,14 +151,17 @@ pub fn add_roots(paths: Vec<String>, state: State<'_, AppState>) -> Result<Vec<R
     roots_dto(&db, &online).map_err(err)
 }
 
-#[tauri::command]
+/// Async: the cascade delete of a large folder and the cover-cache prune take a while.
+#[tauri::command(async)]
 pub fn remove_root(id: i64, state: State<'_, AppState>) -> Result<Vec<RootDto>, String> {
-    let db = state.db();
-    db.remove_root(id).map_err(err)?;
-    let mut online = state.online();
-    online.remove(&id);
-    state.set_online(online.clone());
-    roots_dto(&db, &online).map_err(err)
+    let dto = {
+        let db = state.db();
+        db.remove_root(id).map_err(err)?;
+        state.mark_offline(id);
+        roots_dto(&db, &state.online()).map_err(err)?
+    };
+    crate::cover::prune_with_db(&state);
+    Ok(dto)
 }
 
 /// Starts a background probe + incremental scan; during a running scan, queues one more pass.
@@ -235,6 +239,8 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
     let rep = scan_shared(&state.db, &roots, &online, &mut |p| {
         let _ = app.emit("scan://progress", p);
     });
+    // drop thumbnails of files that changed, vanished or belong to removed folders
+    crate::cover::prune_with_db(state);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let _ = state.db().set_setting("scanned_at", &now.to_string());
     let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped });

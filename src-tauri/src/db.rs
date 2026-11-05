@@ -35,6 +35,8 @@ pub struct SongRow {
     pub id: String, pub root_id: i64, pub file_id: i64, pub rel: String, pub ext: String, pub codec: String,
     pub bitrate: u32, pub size: u64, pub cover: u8, pub title: String, pub artist: String, pub album: String,
     pub track: u32, pub start_ms: u64, pub end_ms: Option<u64>, pub duration: f64,
+    /// the audio file's mtime (unix seconds) as of the last scan
+    pub mtime: i64,
 }
 
 /// Each entry is one schema version (index + 1), applied atomically.
@@ -169,7 +171,7 @@ impl Db {
 
     const SONG_SELECT: &'static str =
         "SELECT s.id, f.root_id, s.file_id, f.rel, f.ext, f.codec, f.bitrate, f.size, f.cover,
-                s.title, s.artist, s.album, s.track, s.start_ms, s.end_ms, s.duration
+                s.title, s.artist, s.album, s.track, s.start_ms, s.end_ms, s.duration, f.mtime
          FROM songs s JOIN files f ON f.id = s.file_id";
 
     fn map_song(r: &rusqlite::Row) -> rusqlite::Result<SongRow> {
@@ -178,7 +180,7 @@ impl Db {
             codec: r.get(5)?, bitrate: r.get(6)?, size: r.get::<_, i64>(7)? as u64, cover: r.get(8)?,
             title: r.get(9)?, artist: r.get(10)?, album: r.get(11)?, track: r.get(12)?,
             start_ms: r.get::<_, i64>(13)? as u64, end_ms: r.get::<_, Option<i64>>(14)?.map(|v| v as u64),
-            duration: r.get(15)?,
+            duration: r.get(15)?, mtime: r.get(16)?,
         })
     }
     pub fn all_songs(&self) -> Result<Vec<SongRow>> {
@@ -189,6 +191,14 @@ impl Db {
     pub fn song(&self, id: &str) -> Result<Option<SongRow>> {
         let mut st = self.conn.prepare(&format!("{} WHERE s.id=?1", Self::SONG_SELECT))?;
         Ok(st.query_row([id], Self::map_song).optional()?)
+    }
+    /// (root path, rel, size, mtime) of every file that has a cover (embedded or folder image).
+    pub fn cover_files(&self) -> Result<Vec<(String, String, u64, i64)>> {
+        let mut st = self.conn.prepare(
+            "SELECT r.path, f.rel, f.size, f.mtime FROM files f JOIN roots r ON r.id = f.root_id WHERE f.cover IN (1,2)")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(v)
     }
     pub fn song_count(&self) -> Result<usize> {
         Ok(self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get::<_, i64>(0))? as usize)

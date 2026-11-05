@@ -25,7 +25,11 @@ pub fn run() {
                         .header("Content-Type", "image/jpeg")
                         .header("Cache-Control", "max-age=31536000, immutable")
                         .body(body),
-                    None => tauri::http::Response::builder().status(404).body(Vec::new()),
+                    // no cover yet (or its folder is offline): let the webview ask again later
+                    None => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Cache-Control", "no-store")
+                        .body(Vec::new()),
                 };
                 responder.respond(res.unwrap_or_else(|_| tauri::http::Response::new(Vec::new())));
             });
@@ -34,6 +38,8 @@ pub fn run() {
             let data_dir = app.path().data_dir()?.join("Linger");
             std::fs::create_dir_all(&data_dir)?;
             let db = db::Db::open(&data_dir.join("linger.db"))?;
+            // thumbnails of the old `{file_id}.jpg` scheme may belong to another song now
+            cover::purge_legacy(&data_dir);
             // all roots start optimistic (online); probing + scanning run in the background
             app.manage(state::AppState::new(db, data_dir));
             commands::player::init(app.handle());

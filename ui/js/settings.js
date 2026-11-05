@@ -1,7 +1,7 @@
 // Settings dialog (music folders, scan, FFmpeg), scan progress and the toast.
 import { t, lang } from './i18n.js';
 import { api } from './api.js';
-import { esc, icon } from './util.js';
+import { esc, icon, applyOnline } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 /** With no scan event for this long, the scan thread is presumed dead and the UI is reset. */
@@ -213,6 +213,15 @@ async function onFinished({ count, skipped = [] }) {
   } else toast(msg, { icon: 'check', autoHide: 5000 });
 }
 
+/** New folder list / online flags: grey out (or re-enable) their songs right away. */
+function rootsChanged(roots) {
+  ctx.lib.roots = roots;
+  const avChanged = applyOnline(ctx.lib.songs, roots);
+  ctx.sidebar();
+  if (avChanged && ctx.loaded) ctx.render();
+  if ($('settings').open) renderRoots();
+}
+
 export function initSettings(c, { loadLibrary }) {
   ctx = c;
   reload = loadLibrary;
@@ -227,10 +236,10 @@ export function initSettings(c, { loadLibrary }) {
   // sent by the scan thread right after probing the folders, before any progress
   api.listen('library://roots', (roots) => {
     beginScan(false);
-    ctx.lib.roots = roots;
-    ctx.sidebar();
-    if ($('settings').open) renderRoots();
+    rootsChanged(roots);
   });
+  // sent by the player when a failing song's folder turned out to be unreachable (no scan)
+  api.listen('library://online', rootsChanged);
   api.listen('scan://progress', onProgress);
   api.listen('scan://finished', onFinished);
 }
