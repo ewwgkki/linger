@@ -128,6 +128,9 @@ function onChanged(change) {
   return queue;
 }
 
+/** Resolves once the pending (re-)fetches are done; `pl.loaded` is then true unless the first fetch failed. */
+export const playlistsSettled = () => queue;
+
 /** First load, then follow `playlists://changed`. */
 export async function initPlaylists(c) {
   ctx = c;

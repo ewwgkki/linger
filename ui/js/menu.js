@@ -22,6 +22,13 @@ export function playIds(ids, ctx) {
   if (l.length) ctx.playList(l, 0, false);
 }
 
+/** Plays the current list from song `id` (like a double-click on its row). */
+function playFrom(id, ctx) {
+  const l = ctx.list.filter((s) => !s.missing && playable(s, ctx.caps));
+  const i = l.findIndex((s) => s.id === id);
+  if (i >= 0) ctx.playList(l, i, false);
+}
+
 /** Adds the songs to the user queue (`next`: right after the current song). */
 export async function queueIds(ids, next, ctx) {
   const l = playableOf(ids, ctx).map((s) => s.id);
@@ -129,7 +136,7 @@ export function openSongMenu(x, y, ids, ctx, { itemIds } = {}) {
   }
   showMenu(x, y, items, (act, r) => {
     const list = rows.map((s) => s.id);
-    if (act === 'play') playIds(list, ctx);
+    if (act === 'play') { if (one) playFrom(one.id, ctx); else playIds(list, ctx); }
     else if (act === 'next' || act === 'queue') queueIds(list, act === 'next', ctx);
     else if (act === 'save') saveSongs(live.map((s) => s.id), { x: r.left, y: r.top }, ctx);
     else if (act === 'artist') ctx.goArtist(one.a);

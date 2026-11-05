@@ -3,7 +3,7 @@
 import { t } from './i18n.js';
 import { api } from './api.js';
 import { esc, norm, icon } from './util.js';
-import { pl, FAV, isSaved, createPlaylist, saveResultKey, errKey } from './playlists.js';
+import { pl, FAV, isSaved, createPlaylist, saveResultKey, errKey, playlistsSettled } from './playlists.js';
 import { askName } from './dialogs.js';
 import { toast } from './settings.js';
 
@@ -172,8 +172,9 @@ async function openPicker(ids, anchor) {
 export async function saveSongs(ids, anchor, ctx) {
   ids = [...new Set(ids)].filter((id) => !ctx || !ctx.songsById || ctx.songsById.has(id));
   if (!ids.length) { toast(t('save.nothing'), { icon: 'check', autoHide: 3000 }); return; }
-  if (!pl.list.length) {
-    // no playlists: "saved" means "in favorites"
+  if (!pl.loaded) await playlistsSettled();
+  if (pl.loaded && !pl.list.length) {
+    // no playlists: "saved" means "in favorites" (not when the list never loaded: open the picker)
     const all = ids.every(isSaved);
     await apply(ids, all ? [] : [FAV], all ? [FAV] : []);
     return;

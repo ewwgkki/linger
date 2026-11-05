@@ -25,5 +25,5 @@ test('missingText empty when all found', () => {
 
 test('summaryKey sums', () => {
   const r = { playlists: [...report.playlists, { source: 'c.csv', name: 'None', id: null, total: 3, matched: 0, missing: [] }], failed: [] };
-  assert.deepEqual(summaryKey(r), ['import.summary', { lists: 2, matched: 4, total: 9 }]);
+  assert.deepEqual(summaryKey(r), ['import.summary', { n: 2, matched: 4, total: 9 }]);
 });

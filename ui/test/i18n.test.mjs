@@ -8,11 +8,14 @@ import { t, setMessages, detectLang, lang } from '../js/i18n.js';
 const ui = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (l) => JSON.parse(readFileSync(join(ui, 'i18n', `${l}.json`), 'utf8'));
 
-test('zh-CN and en have identical key sets', () => {
+const isOne = (k) => k.endsWith('_one');
+
+test('zh-CN and en have identical key sets (en may add _one singulars)', () => {
   const zh = Object.keys(load('zh-CN')).sort();
-  const en = Object.keys(load('en')).sort();
+  const en = Object.keys(load('en')).filter((k) => !isOne(k)).sort();
   assert.deepEqual(zh, en);
   assert.ok(zh.length > 50);
+  assert.ok(!zh.some(isOne), 'zh-CN needs no _one keys');
 });
 
 test('every value is a non-empty string and placeholders match', () => {
@@ -23,6 +26,26 @@ test('every value is a non-empty string and placeholders match', () => {
     assert.ok(zh[k].length && en[k].length, k);
     assert.equal(ph(zh[k]), ph(en[k]), k);
   }
+  for (const k of Object.keys(en).filter(isOne)) {
+    const base = k.slice(0, -4);
+    assert.ok(base in en, `${k} has no base key`);
+    assert.ok(ph(en[base]).includes('{n}'), `${base} has no {n}`);
+    assert.equal(typeof en[k], 'string', k);
+    assert.equal(ph(en[k]), ph(en[base]), k);
+  }
+});
+
+test('t picks the _one variant only for n === 1 when it exists', () => {
+  setMessages('en', load('en'));
+  assert.equal(t('meta.songs', { n: 1 }), '1 song');
+  assert.equal(t('meta.songs', { n: 0 }), '0 songs');
+  assert.equal(t('meta.songs', { n: 2 }), '2 songs');
+  assert.equal(t('import.summary', { n: 1, matched: 3, total: 4 }), 'Created 1 playlist, matched 3 of 4 songs.');
+  assert.equal(t('save.changed', { n: 1, r: 2 }), 'Saved 1 song, removed 2');
+  setMessages('en', { k: '{n} things' });
+  assert.equal(t('k', { n: 1 }), '1 things'); // no _one: base key
+  setMessages('zh-CN', load('zh-CN'));
+  assert.equal(t('meta.songs', { n: 1 }), '1 首');
 });
 
 test('backend keys are present', () => {

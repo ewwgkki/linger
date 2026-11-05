@@ -43,6 +43,7 @@
   "hero.unplayable": "{n} songs can't be played right now (folder unreachable, or WMA/APE needs FFmpeg) and will be skipped",
 
   "meta.songs": "{n} songs",
+  "meta.songs_one": "{n} song",
   "meta.albums": "{n} albums",
   "meta.artistsCount": "{n} artists",
   "meta.albumsCount": "{n} albums",
@@ -173,6 +174,7 @@
   "playlist.missing": "File missing",
   "playlist.missingTip": "This song's file is no longer in the library, so it can't be played",
   "playlist.missingCount": "{n} songs have missing files and will be skipped",
+  "playlist.missingCount_one": "{n} song has a missing file and will be skipped",
   "playlist.emptyTitle": "This playlist is empty",
   "playlist.emptyText": "Save songs to it from the song list.",
 
@@ -185,8 +187,11 @@
   "sort.added": "Date added",
 
   "save.added": "Saved {n} songs",
+  "save.added_one": "Saved {n} song",
   "save.removed": "Removed {n} songs",
+  "save.removed_one": "Removed {n} song",
   "save.changed": "Saved {n} songs, removed {r}",
+  "save.changed_one": "Saved {n} song, removed {r}",
   "save.nothing": "Nothing changed",
 
   "dlg.ok": "OK",
@@ -206,7 +211,9 @@
   "menu.removeFromPl": "Remove from playlist",
   "menu.removeFromFav": "Remove from Liked songs",
   "menu.queued": "Added {n} songs to the queue",
+  "menu.queued_one": "Added {n} song to the queue",
   "menu.queuedNext": "{n} songs will play next",
+  "menu.queuedNext_one": "{n} song will play next",
 
   "sel.bar": "Selected songs",
   "sel.count": "{n} selected",
@@ -223,6 +230,7 @@
   "queue.from": "Next from {name}",
   "queue.next": "Next up",
   "queue.more": "{n} more songs",
+  "queue.more_one": "{n} more song",
   "queue.clear": "Clear",
   "queue.remove": "Remove",
   "queue.playThis": "Play this song",
@@ -241,7 +249,8 @@
   "import.running": "Importing playlists...",
   "import.error": "Import failed: {msg}",
   "import.reportTitle": "Import report",
-  "import.summary": "Created {lists} playlists, matched {matched} of {total} songs.",
+  "import.summary": "Created {n} playlists, matched {matched} of {total} songs.",
+  "import.summary_one": "Created {n} playlist, matched {matched} of {total} songs.",
   "import.listHead": "{name} (matched {matched}/{total})",
   "import.notCreated": "not created",
   "import.failedTitle": "Files that could not be read",

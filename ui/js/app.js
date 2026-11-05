@@ -11,8 +11,8 @@ import { initSettings, openSettings, openImport, toast } from './settings.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
-import { openSongMenu, closeMenus, playIds, queueIds, removeIds, savableIds } from './menu.js';
-import { saveSongs } from './savepicker.js';
+import { openSongMenu, closeMenus, menuOpen, playIds, queueIds, removeIds, savableIds } from './menu.js';
+import { saveSongs, pickerOpen } from './savepicker.js';
 import { initQueue } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
@@ -395,7 +395,8 @@ $('clearq').onclick = () => { resetSearch(); render(); $('q').focus(); };
 document.addEventListener('keydown', (e) => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open || $('namedlg').open || $('confirmdlg').open;
   if (e.key === '/' && !typing) { e.preventDefault(); $('q').focus(); }
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing && ctx.view && ctx.list.length) {
+  const overlay = menuOpen() || pickerOpen() || !!document.querySelector('dialog[open]');
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing && !overlay && ctx.view && ctx.list.length) {
     e.preventDefault();
     selectAll(ctx.sel, listIds());
     paintSel();

@@ -241,7 +241,7 @@
   "import.running": "正在导入歌单…",
   "import.error": "导入失败：{msg}",
   "import.reportTitle": "导入报告",
-  "import.summary": "已创建 {lists} 个歌单，共匹配 {matched} / {total} 首。",
+  "import.summary": "已创建 {n} 个歌单，共匹配 {matched} / {total} 首。",
   "import.listHead": "{name}（匹配 {matched}/{total}）",
   "import.notCreated": "未创建",
   "import.failedTitle": "没能读取的文件",

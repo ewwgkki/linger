@@ -19,8 +19,12 @@ export function setMessages(l, messages) {
   dict = messages || {};
 }
 
+const has = (k) => Object.prototype.hasOwnProperty.call(dict, k);
+
+/** `params.n === 1` uses `key_one` when the dictionary has it (en singulars). */
 export function t(key, params) {
-  const s = Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : key;
+  if (params && params.n === 1 && has(key + '_one')) key += '_one';
+  const s = has(key) ? dict[key] : key;
   if (!params) return s;
   return s.replace(/\{(\w+)\}/g, (m, k) => (k in params ? String(params[k]) : m));
 }

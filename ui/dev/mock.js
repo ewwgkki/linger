@@ -104,6 +104,7 @@ export function createMock() {
   const part = (p) => { if (p !== 'up' && p !== 'ctx') throw 'queue.badPart'; return p; };
   const ctxLen = () => Math.max(0, queue.length - qi - 1);
   const checkIndex = (p, i) => { if (!(i >= 0 && i < (p === 'up' ? up.length : ctxLen()))) throw 'queue.badIndex'; };
+  const checkId = (p, i, id) => { checkIndex(p, i); if ((p === 'up' ? up[i] : queue[qi + 1 + i]) !== id) throw 'queue.badIndex'; };
   clearInterval(timer);
   timer = setInterval(() => {
     if (!ps.playing) return;
@@ -255,21 +256,22 @@ export function createMock() {
       else up.push(...ids);
       emitQueue();
     },
-    player_queue_remove: ({ part: p, index }) => {
-      checkIndex(part(p), index);
+    player_queue_remove: ({ part: p, index, id }) => {
+      checkId(part(p), index, id);
       if (p === 'up') up.splice(index, 1); else queue.splice(qi + 1 + index, 1);
       emitQueue();
     },
-    player_queue_move: ({ part: p, from, to }) => {
-      checkIndex(part(p), from); checkIndex(p, to);
+    player_queue_move: ({ part: p, from, to, id }) => {
+      checkId(part(p), from, id); checkIndex(p, to);
       const l = p === 'up' ? up : queue, base = p === 'up' ? 0 : qi + 1;
       l.splice(base + to, 0, ...l.splice(base + from, 1));
       emitQueue();
     },
-    player_queue_jump: ({ part: p, index }) => {
-      checkIndex(part(p), index);
+    player_queue_jump: ({ part: p, index, id }) => {
+      checkId(part(p), index, id);
       if (p === 'up') { up.splice(0, index); playId(up.shift()); } else load(qi + 1 + index);
     },
+    player_queue_clear: () => { up = []; emitQueue(); },
     player_state: () => ({ ...ps }),
   };
 

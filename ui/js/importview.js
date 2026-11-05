@@ -13,7 +13,7 @@ export function missingText(report) {
 export function summaryKey(report) {
   const ps = report.playlists;
   return ['import.summary', {
-    lists: ps.filter((p) => p.id != null).length,
+    n: ps.filter((p) => p.id != null).length,
     matched: ps.reduce((a, p) => a + p.matched, 0),
     total: ps.reduce((a, p) => a + p.total, 0),
   }];

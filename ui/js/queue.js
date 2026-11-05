@@ -75,40 +75,45 @@ function refresh(delay = 30) {
   }, delay);
 }
 
-/** Sends an edit; on failure shows the error and re-fetches the real queue. */
+/**
+ * Sends an edit; on failure re-fetches the real queue. `queue.badIndex` means the queue changed
+ * under the edit (e.g. the song advanced), so only the re-fetch is needed, no error toast.
+ */
 function send(cmd, args) {
   seq++; // a fetch already in flight is older than this edit
-  return api.invoke(cmd, args).catch((e) => { showErr(e); refresh(0); });
+  return api.invoke(cmd, args).catch((e) => { if (errKey(e) !== 'queue.badIndex') showErr(e); refresh(0); });
 }
 
 const list = (part) => (part === 'up' ? q.up : q.ctx);
 
+// Edits name the song expected at the index; the backend refuses if the queue moved on meanwhile.
 function move(part, from, to) {
   const l = list(part);
+  const id = l[from];
+  if (id === undefined) return;
   l.splice(to, 0, ...l.splice(from, 1));
   render();
-  send('player_queue_move', { part, from, to });
+  send('player_queue_move', { part, from, to, id });
 }
 
 function remove(part, index) {
+  const id = list(part)[index];
+  if (id === undefined) return;
   list(part).splice(index, 1);
   if (part === 'ctx') q.ctx_total = Math.max(0, q.ctx_total - 1);
   render();
-  send('player_queue_remove', { part, index });
+  send('player_queue_remove', { part, index, id });
 }
 
-const jump = (part, index) => send('player_queue_jump', { part, index });
+function jump(part, index) {
+  const id = list(part)[index];
+  if (id !== undefined) send('player_queue_jump', { part, index, id });
+}
 
-/** Removes the user queue one entry at a time (there is no bulk command). */
-async function clearUp() {
-  const n = q.up.length;
+function clearUp() {
   q.up = [];
   render();
-  for (let k = 0; k < n; k++) {
-    seq++;
-    try { await api.invoke('player_queue_remove', { part: 'up', index: 0 }); } catch (e) { showErr(e); break; }
-  }
-  refresh(0);
+  send('player_queue_clear');
 }
 
 export function openQueue() {
