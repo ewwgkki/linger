@@ -4,6 +4,7 @@ pub mod cue;
 pub mod db;
 pub mod derive;
 pub mod ffmpeg;
+pub mod player;
 pub mod scan;
 pub mod state;
 pub mod tags;
@@ -35,6 +36,7 @@ pub fn run() {
             let db = db::Db::open(&data_dir.join("linger.db"))?;
             // all roots start optimistic (online); probing + scanning run in the background
             app.manage(state::AppState::new(db, data_dir));
+            commands::player::init(app.handle());
             commands::library::spawn_scan(app.handle().clone());
             Ok(())
         })
@@ -43,6 +45,15 @@ pub fn run() {
             commands::library::add_roots,
             commands::library::remove_root,
             commands::library::start_scan,
+            commands::player::player_play_list,
+            commands::player::player_toggle,
+            commands::player::player_next,
+            commands::player::player_prev,
+            commands::player::player_seek,
+            commands::player::player_set_volume,
+            commands::player::player_set_shuffle,
+            commands::player::player_set_repeat,
+            commands::player::player_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Linger");
