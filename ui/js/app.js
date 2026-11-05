@@ -13,6 +13,7 @@ import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
 import { openSongMenu, closeMenus, playIds, queueIds, removeIds, savableIds } from './menu.js';
 import { saveSongs } from './savepicker.js';
+import { initQueue } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -146,7 +147,10 @@ $('scrim').onclick = closeDrawer;
 function render() {
   syncSide();
   $('clearq').hidden = !state.q;
-  if (ctx.view && ctx.view.vlist) ctx.view.vlist.destroy();
+  if (ctx.view) (ctx.view.destroy || (() => ctx.view.vlist && ctx.view.vlist.destroy()))();
+  // keep the page height while the list is rebuilt, so the window scroll is not clamped
+  const v = $('view');
+  v.style.minHeight = v.offsetHeight + 'px';
   if (state.tab === 'songs' || isPlTab(state.tab)) {
     ctx.view = (state.tab === 'songs' ? renderSongs : renderPlaylist)($('view'), ctx);
     ctx.list = ctx.view.list;
@@ -156,6 +160,7 @@ function render() {
     ctx.view = null;
     ctx.list = [];
   }
+  v.style.minHeight = '';
   pruneSelection(ctx.sel, listIds());
   paintSel();
 }
@@ -432,6 +437,7 @@ async function boot() {
     $('view').innerHTML = `<div class="empty">${icon('disc')}<h2>${esc(t('error.loadTitle'))}</h2><p>${esc(String(e && e.message || e))}</p></div>`;
     return;
   }
+  initQueue(ctx);
   await initPlayer(ctx);
   // first start: nothing to show until a folder is added
   if (!ctx.lib.roots.length) ctx.openSettings();

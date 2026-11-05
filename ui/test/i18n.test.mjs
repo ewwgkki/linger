@@ -28,7 +28,8 @@ test('every value is a non-empty string and placeholders match', () => {
 test('backend keys are present', () => {
   const zh = load('zh-CN');
   for (const k of ['skip.notaudio', 'skip.unreadable', 'skip.dberror', 'player.notFound', 'player.needFfmpeg',
-    'player.unsupported', 'player.io', 'player.corrupt', 'player.noOutput', 'song.offline', 'meta.songs']) {
+    'player.unsupported', 'player.io', 'player.corrupt', 'player.noOutput', 'song.offline', 'meta.songs',
+    'queue.badPart', 'queue.badIndex']) {
     assert.ok(k in zh, k);
   }
 });

@@ -214,5 +214,22 @@
 
   "save.title": "Save to",
   "save.filter": "Filter playlists",
-  "save.done": "Done"
+  "save.done": "Done",
+
+  "queue.title": "Play queue",
+  "queue.open": "Play queue (Q)",
+  "queue.now": "Now playing",
+  "queue.up": "Next in queue",
+  "queue.from": "Next from {name}",
+  "queue.next": "Next up",
+  "queue.more": "{n} more songs",
+  "queue.clear": "Clear",
+  "queue.remove": "Remove",
+  "queue.playThis": "Play this song",
+  "queue.empty": "The queue is empty",
+  "queue.emptyText": "Play something and the songs coming up will show here.",
+  "queue.unknownSong": "Unknown song",
+  "queue.badPart": "Invalid queue operation",
+  "queue.badIndex": "The queue has changed. Please try again.",
+  "reorder.handle": "Drag to reorder (Alt+Up/Down)"
 }

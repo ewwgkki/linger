@@ -6,6 +6,7 @@ import { FAV, saveResultKey, errKey } from './playlists.js';
 import { saveSongs, place, closePicker } from './savepicker.js';
 import { fullPath } from './views/songs.js';
 import { toast } from './settings.js';
+import { playerState, clearSource } from './player.js';
 
 const $ = (id) => document.getElementById(id);
 const showErr = (e) => toast(t(errKey(e)), { icon: 'x', autoHide: 6000 });
@@ -26,6 +27,8 @@ export async function queueIds(ids, next, ctx) {
   const l = playableOf(ids, ctx).map((s) => s.id);
   if (!l.length) return;
   try {
+    // with nothing playing the backend plays these songs as a new list with no source page
+    if (!playerState().id) clearSource();
     await api.invoke('player_queue_add', { ids: l, next: !!next });
     done(t(next ? 'menu.queuedNext' : 'menu.queued', { n: l.length }));
   } catch (e) { showErr(e); }
@@ -124,6 +127,39 @@ export function openSongMenu(x, y, ids, ctx, { itemIds } = {}) {
     if (items.length) items.push(['-']);
     items.push(['remove', 'trash', tab === 'pl' ? 'menu.removeFromPl' : 'menu.removeFromFav', false]);
   }
+  showMenu(x, y, items, (act, r) => {
+    const list = rows.map((s) => s.id);
+    if (act === 'play') playIds(list, ctx);
+    else if (act === 'next' || act === 'queue') queueIds(list, act === 'next', ctx);
+    else if (act === 'save') saveSongs(live.map((s) => s.id), { x: r.left, y: r.top }, ctx);
+    else if (act === 'artist') ctx.goArtist(one.a);
+    else if (act === 'album') ctx.goAlbum(one.b);
+    else if (act === 'copy') copyText(fullPath(ctx.lib.roots, one)).then(() => done(t('menu.copied')), showErr);
+    else if (act === 'remove') removeIds(list, ctx, itemIds);
+  });
+}
+
+/**
+ * Context menu for a row of the play queue panel: song `id`; `onJump` / `onRemove` are given for
+ * rows that can be played / removed (not for the playing song).
+ */
+export function openQueueMenu(x, y, id, ctx, { onJump, onRemove } = {}) {
+  closeMenus();
+  const s = ctx.songsById.get(id);
+  const items = [];
+  if (onJump) items.push(['jump', 'play', 'queue.playThis', !(s && playable(s, ctx.caps))]);
+  if (s) items.push(['save', 'heart', 'menu.saveTo', false]);
+  if (onRemove) items.push(...(items.length ? [['-']] : []), ['remove', 'trash', 'queue.remove', false]);
+  if (!items.length) return;
+  showMenu(x, y, items, (act, r) => {
+    if (act === 'jump') onJump();
+    else if (act === 'save') saveSongs([id], { x: r.left, y: r.top }, ctx);
+    else if (act === 'remove') onRemove();
+  });
+}
+
+/** Renders `items` ([act, icon, label key, disabled] or ['-']) at (x, y); `run(act, menuRect)` after closing. */
+function showMenu(x, y, items, run) {
   const el = $('menu');
   el.innerHTML = items.map(([k, ic, label, off]) => (k === '-' ? '<div class="m-sep" role="separator"></div>'
     : `<button type="button" role="menuitem" class="m-item${k === 'remove' ? ' danger' : ''}" data-act="${k}"${off ? ' disabled' : ''}>${icon(ic, ic === 'play' || ic === 'next' ? 'f' : '')}<span>${esc(t(label))}</span></button>`)).join('');
@@ -137,16 +173,9 @@ export function openSongMenu(x, y, ids, ctx, { itemIds } = {}) {
   el.onclick = (e) => {
     const b = e.target.closest('[data-act]');
     if (!b || b.disabled) return;
-    const act = b.dataset.act, list = rows.map((s) => s.id);
     const r = el.getBoundingClientRect();
     closeMenus();
-    if (act === 'play') playIds(list, ctx);
-    else if (act === 'next' || act === 'queue') queueIds(list, act === 'next', ctx);
-    else if (act === 'save') saveSongs(live.map((s) => s.id), { x: r.left, y: r.top }, ctx);
-    else if (act === 'artist') ctx.goArtist(one.a);
-    else if (act === 'album') ctx.goAlbum(one.b);
-    else if (act === 'copy') copyText(fullPath(ctx.lib.roots, one)).then(() => done(t('menu.copied')), showErr);
-    else if (act === 'remove') removeIds(list, ctx, itemIds);
+    run(b.dataset.act, r);
   };
   el.querySelector('[role=menuitem]:not([disabled])')?.focus({ preventScroll: true });
 }

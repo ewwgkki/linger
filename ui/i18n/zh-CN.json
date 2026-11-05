@@ -214,5 +214,22 @@
 
   "save.title": "收藏到",
   "save.filter": "搜索歌单",
-  "save.done": "完成"
+  "save.done": "完成",
+
+  "queue.title": "播放队列",
+  "queue.open": "播放队列（Q）",
+  "queue.now": "正在播放",
+  "queue.up": "接下来：队列中",
+  "queue.from": "接下来：来自 {name}",
+  "queue.next": "接下来",
+  "queue.more": "还有 {n} 首",
+  "queue.clear": "清空",
+  "queue.remove": "移除",
+  "queue.playThis": "播放此首",
+  "queue.empty": "队列是空的",
+  "queue.emptyText": "播放歌曲后，接下来要播放的歌会显示在这里。",
+  "queue.unknownSong": "未知歌曲",
+  "queue.badPart": "无效的队列操作",
+  "queue.badIndex": "播放队列已变化，请重试",
+  "reorder.handle": "拖动排序（Alt+↑/↓）"
 }

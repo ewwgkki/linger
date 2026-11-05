@@ -1,9 +1,12 @@
 // Playlist page (state.tab 'pl', state.pl = id) and the liked-songs page (state.tab 'fav').
 import { t } from '../i18n.js';
 import { esc, hm, norm, playable, icon } from '../util.js';
+import { api } from '../api.js';
 import { mountVList } from '../vlist.js';
-import { pl, FAV, cachedItems, loadItems, itemsToRows, selectRows, errKey } from '../playlists.js';
+import { attachReorder } from '../reorder.js';
+import { pl, FAV, cachedItems, loadItems, itemsToRows, selectRows, errKey, moveCached, refetchItems } from '../playlists.js';
 import { art, withCover, rowHtml, rowHeight, SORTS, DETAIL_H } from './songs.js';
+import { toast } from '../settings.js';
 
 /** Rows per item list, rebuilt when the list or the library changes. */
 const rowsCache = new WeakMap();
@@ -79,16 +82,56 @@ export function renderPlaylist(el, ctx) {
     el.innerHTML = html + emptyBox('search', '', t('empty.noMatch'));
     return none(list);
   }
-  el.innerHTML = html + '<div class="songs" id="songlist"></div>';
+  // drag to reorder: playlists in custom order (either direction) without a search
+  const grip = !fav && col === 'pos' && !q && list.length > 1;
+  el.innerHTML = html + `<div class="songs${grip ? ' reorderable' : ''}" id="songlist"></div>`;
   const expanded = () => {
     const i = state.open ? list.findIndex((s) => s.id === state.open && !s.missing) : -1;
     return i >= 0 ? { index: i, extra: DETAIL_H } : null;
   };
-  const vlist = mountVList(el.querySelector('#songlist'), {
+  const box = el.querySelector('#songlist');
+  const vlist = mountVList(box, {
     count: list.length,
     rowH: rowHeight(),
-    render: (i) => rowHtml(ctx, list[i], q),
+    render: (i) => rowHtml(ctx, list[i], q, grip),
     expanded: expanded(),
   });
-  return { list, vlist, refresh: () => vlist.update({ rowH: rowHeight(), expanded: expanded() }) };
+  const detach = grip ? attachReorder(box, {
+    rowH: rowHeight,
+    handle: '[data-grip]',
+    count: () => list.length,
+    scroller: window,
+    bounds: visibleBand,
+    onStart() {
+      if (!state.open) return;
+      state.open = null;
+      vlist.update({ expanded: null });
+    },
+    onMove(from, to) {
+      const n = list.length, real = (i) => (dir < 0 ? n - 1 - i : i);
+      const row = list[from];
+      const refocus = box.contains(document.activeElement);
+      // optimistic: `list` is also ctx.list
+      list.splice(to, 0, ...list.splice(from, 1));
+      moveCached(id, row._i, real(to));
+      vlist.update({ expanded: expanded() });
+      if (refocus) vlist.node(to)?.querySelector('[data-grip]')?.focus({ preventScroll: true });
+      api.invoke('playlist_move', { id, itemId: row._i, to: real(to) }).catch((e) => {
+        toast(t(errKey(e)), { icon: 'x', autoHide: 6000 });
+        refetchItems(id).then(() => { if (state.tab === 'pl' && state.pl === id) ctx.render(); }, () => {});
+      });
+    },
+  }) : null;
+  return {
+    list,
+    vlist,
+    refresh: () => vlist.update({ rowH: rowHeight(), expanded: expanded() }),
+    destroy() { if (detach) detach(); vlist.destroy(); },
+  };
+}
+
+/** Part of the window between the top bar and the player bar (drag auto-scroll edges). */
+function visibleBand() {
+  const bar = document.querySelector('.topbar'), p = document.getElementById('player');
+  return { top: bar ? bar.getBoundingClientRect().bottom : 0, bottom: innerHeight - (p && !p.hidden ? p.offsetHeight : 0) };
 }

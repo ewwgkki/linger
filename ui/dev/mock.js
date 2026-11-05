@@ -1,8 +1,10 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
 // URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
-// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1 (screenshots only: selects rows
-// 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
-// menu1: plays the first playable row and opens the menu for row 4 alone).
+// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag (screenshots only:
+// selects rows 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
+// menu1: plays the first playable row and opens the menu for row 4 alone; queue: plays the list, queues three
+// songs and opens the queue panel; qmenu: also right-clicks a queued row; drag: starts dragging row 1 by its
+// grip down to row 4 on a playlist page).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -79,21 +81,34 @@ export function createMock() {
   const subs = new Map();
   const emit = (ev, payload) => (subs.get(ev) || []).forEach((cb) => setTimeout(() => cb(payload)));
   const ps = { id: null, playing: false, pos: 0, dur: 0, shuffle: false, repeat: 'off', volume: 100 };
-  let queue = [], qi = 0, timer = 0;
+  // the play source (`queue`, position `qi`) plus the user queue `up`, played first (simplified: no
+  // shuffle order, the source is kept as given)
+  let queue = [], qi = 0, up = [], timer = 0;
   const pushState = () => emit('player://state', { ...ps });
-  const load = (i) => {
-    qi = i;
-    const s = byId.get(queue[qi]);
+  const emitQueue = () => emit('player://queue', null);
+  const playId = (id) => {
+    const s = byId.get(id);
     ps.id = s ? s.id : null; ps.pos = 0; ps.dur = s ? s.s : 0; ps.playing = !!s;
     if (s && !ffmpeg && (s.c === 'wma' || s.c === 'ape')) { ps.playing = false; emit('player://error', { id: s.id, reason: 'player.needFfmpeg' }); }
     pushState();
+    emitQueue();
   };
+  const load = (i) => { qi = i; playId(queue[qi]); };
+  const advance = () => {
+    if (up.length) playId(up.shift());
+    else if (qi + 1 < queue.length) load(qi + 1);
+    else if (ps.repeat === 'all' && queue.length) load(0);
+    else { ps.playing = false; pushState(); }
+  };
+  const part = (p) => { if (p !== 'up' && p !== 'ctx') throw 'queue.badPart'; return p; };
+  const ctxLen = () => Math.max(0, queue.length - qi - 1);
+  const checkIndex = (p, i) => { if (!(i >= 0 && i < (p === 'up' ? up.length : ctxLen()))) throw 'queue.badIndex'; };
   clearInterval(timer);
   timer = setInterval(() => {
     if (!ps.playing) return;
     ps.pos = Math.min(ps.dur, ps.pos + 0.25);
     emit('player://pos', { pos: ps.pos });
-    if (ps.pos >= ps.dur) { if (qi + 1 < queue.length) load(qi + 1); else { ps.playing = false; pushState(); } }
+    if (ps.pos >= ps.dur) advance();
   }, 250);
 
   // ---------- playlists and favorites (in memory; favorites are target 0 in save_songs) ----------
@@ -206,23 +221,41 @@ export function createMock() {
         }
       }, 100);
     },
-    player_play_list: ({ ids, start, shuffle }) => { queue = ids.slice(); ps.shuffle = !!shuffle || ps.shuffle; load(start || 0); },
+    player_play_list: ({ ids, start, shuffle }) => { queue = ids.slice(); up = []; ps.shuffle = !!shuffle || ps.shuffle; load(start || 0); },
     player_toggle: () => { if (ps.id) { ps.playing = !ps.playing; pushState(); } },
-    player_next: () => { if (queue.length) load((qi + 1) % queue.length); },
+    player_next: () => { if (up.length || queue.length) { const r = ps.repeat; ps.repeat = 'all'; advance(); ps.repeat = r; } },
     player_prev: () => { if (ps.pos > 4) { ps.pos = 0; pushState(); } else if (qi > 0) load(qi - 1); },
     player_seek: ({ secs }) => { ps.pos = Math.max(0, Math.min(ps.dur, secs)); pushState(); },
     player_set_volume: ({ volume }) => { ps.volume = volume; pushState(); },
-    player_set_shuffle: ({ on }) => { ps.shuffle = !!on; pushState(); },
+    player_set_shuffle: ({ on }) => { ps.shuffle = !!on; pushState(); emitQueue(); },
     player_set_repeat: ({ mode }) => { ps.repeat = mode; pushState(); },
+    player_queue: () => ({ now: ps.id, up: up.slice(), ctx: queue.slice(qi + 1, qi + 201), ctx_total: ctxLen() }),
     player_queue_add: ({ ids, next }) => {
-      if (!ps.id) { queue = ids.slice(); load(0); return; }
-      if (next) queue.splice(qi + 1, 0, ...ids);
-      else queue.push(...ids);
+      if (!ids.length) return;
+      if (!ps.id) { queue = ids.slice(); up = []; load(0); return; }
+      if (next) up.unshift(...ids);
+      else up.push(...ids);
+      emitQueue();
+    },
+    player_queue_remove: ({ part: p, index }) => {
+      checkIndex(part(p), index);
+      if (p === 'up') up.splice(index, 1); else queue.splice(qi + 1 + index, 1);
+      emitQueue();
+    },
+    player_queue_move: ({ part: p, from, to }) => {
+      checkIndex(part(p), from); checkIndex(p, to);
+      const l = p === 'up' ? up : queue, base = p === 'up' ? 0 : qi + 1;
+      l.splice(base + to, 0, ...l.splice(base + from, 1));
+      emitQueue();
+    },
+    player_queue_jump: ({ part: p, index }) => {
+      checkIndex(part(p), index);
+      if (p === 'up') { up.splice(0, index); playId(up.shift()); } else load(qi + 1 + index);
     },
     player_state: () => ({ ...ps }),
   };
 
-  if (qs.get('shot')) setTimeout(() => shot(qs.get('shot')), 1200);
+  if (qs.get('shot')) setTimeout(() => shot(qs.get('shot'), commands), 1200);
 
   return {
     async invoke(cmd, args = {}) {
@@ -239,12 +272,37 @@ export function createMock() {
 }
 
 /** Screenshot setup: there is no right click in a headless browser, so drive the UI with synthetic events. */
-function shot(what) {
+function shot(what, commands) {
   const rows = () => [...document.querySelectorAll('#songlist .song')];
   const click = (el, o) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...o }));
   if (rows().length < 8) return;
   // the headless capture resizes the window, which would close the menu / popover
   if (what !== 'sel') window.addEventListener('resize', (e) => e.stopImmediatePropagation(), true);
+  if (what === 'queue' || what === 'qmenu') {
+    document.querySelector('#playall').click();
+    setTimeout(() => {
+      const ids = rows().slice(5, 8).map((r) => r.dataset.id);
+      commands.player_queue_add({ ids, next: false });
+      document.getElementById('queuebtn').click();
+      if (what === 'qmenu') {
+        // the capture also scrolls the panel, which would close the menu
+        document.addEventListener('scroll', (e) => e.stopImmediatePropagation(), true);
+        setTimeout(() => {
+          const row = document.querySelector('#qup .q-row'), box = row.getBoundingClientRect();
+          row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 120, clientY: box.top + 30 }));
+        }, 300);
+      }
+    }, 200);
+    return;
+  }
+  if (what === 'drag') {
+    const grip = rows()[1].querySelector('[data-grip]'), box = grip.getBoundingClientRect();
+    const opt = (y) => ({ bubbles: true, cancelable: true, button: 0, clientX: box.left + 8, clientY: y, pointerId: 1, pointerType: 'mouse' });
+    grip.dispatchEvent(new PointerEvent('pointerdown', opt(box.top + 10)));
+    const rowH = rows()[1].offsetHeight;
+    document.dispatchEvent(new PointerEvent('pointermove', opt(box.top + 10 + rowH * 2.7)));
+    return;
+  }
   if (what === 'menu1') {
     // one song: play another one first (player bar heart), then right-click a row
     const pb = document.querySelector('#songlist [data-play]');

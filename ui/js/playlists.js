@@ -85,6 +85,24 @@ export function loadItems(id) {
   return p;
 }
 
+/** Optimistic reorder of a cached list: moves the item `itemId` to index `to` (a new array, so row caches rebuild). */
+export function moveCached(id, itemId, to) {
+  const list = items.get(id);
+  if (!list) return;
+  const k = list.findIndex((x) => x.i === itemId);
+  if (k < 0) return;
+  const next = list.slice();
+  const [x] = next.splice(k, 1);
+  next.splice(Math.max(0, Math.min(next.length, to)), 0, x);
+  items.set(id, next);
+}
+
+/** Drops the cached items of `id` and fetches them again. */
+export function refetchItems(id) {
+  invalidate(id);
+  return loadItems(id);
+}
+
 function invalidate(id) {
   if (id == null) { epoch++; items.clear(); pending.clear(); } else { gens.set(id, (gens.get(id) || 0) + 1); items.delete(id); pending.delete(id); }
 }

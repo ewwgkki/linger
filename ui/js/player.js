@@ -4,8 +4,9 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss, trackSlider } from './util.js';
 import { art, badges, artistName } from './views/songs.js';
-import { isSaved } from './playlists.js';
+import { pl, isSaved, cachedItems, loadItems, FAV } from './playlists.js';
 import { saveSongs } from './savepicker.js';
+import { toggleQueue } from './queue.js';
 
 const $ = (id) => document.getElementById(id);
 const REPEAT_NEXT = { all: 'one', one: 'off', off: 'all' };
@@ -14,7 +15,10 @@ const REPEAT_KEY = { all: 'player.repeatAll', one: 'player.repeatOne', off: 'pla
 let ctx = null;
 /** Last state from the backend. */
 let ps = { id: null, playing: false, pos: 0, dur: 0, shuffle: false, repeat: 'all', volume: 100 };
-/** The page and filters the current queue was started from (for revealNow(true)). */
+/**
+ * The page and filters the current queue was started from (for revealNow(true)), with `label`:
+ * the page title then (the queue panel's "from <label>").
+ */
 let source = null;
 let seekDrag = { dragging: () => false };
 /** Ignore `player://pos` briefly after a seek: events already in flight carry the old spot. */
@@ -23,6 +27,17 @@ let volDrag = { dragging: () => false };
 let errId = null, errTimer = 0;
 
 export const playerState = () => ps;
+
+/** Name of the page the queue was started from, or '' when unknown. */
+export function sourceLabel() {
+  if (!source) return '';
+  if (source.tab === 'fav') return t('fav.title');
+  if (source.tab === 'pl') { const p = pl.list.find((x) => x.id === source.pl); return p ? p.name : source.label || ''; }
+  return source.label || '';
+}
+
+/** Forget the source (playback started some other way, e.g. adding to an empty queue). */
+export function clearSource() { source = null; }
 
 const songById = (id) => (id && ctx.lib.songs.find((s) => s.id === id)) || null;
 
@@ -64,7 +79,7 @@ export function showSaved() {
 
 /** Highlights the playing row among the rendered rows. */
 export function markRows() {
-  document.querySelectorAll('.song').forEach((r) => r.classList.toggle('now', !!ps.id && r.dataset.id === ps.id));
+  document.querySelectorAll('#view .song').forEach((r) => r.classList.toggle('now', !!ps.id && r.dataset.id === ps.id));
 }
 
 function applyState(st) {
@@ -122,7 +137,8 @@ const call = (cmd, args) => api.invoke(cmd, args).catch((e) => console.error(cmd
 export function playList(list, start, shuffle) {
   if (!list.length) return;
   const st = ctx.state;
-  source = { tab: st.tab, pl: st.pl, plSort: st.plSort && { ...st.plSort }, artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root };
+  const h1 = document.querySelector('#view .hero h1');
+  source = { tab: st.tab, pl: st.pl, label: h1 ? h1.textContent.trim() : '', plSort: st.plSort && { ...st.plSort }, artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root };
   hideError();
   call('player_play_list', { ids: list.map((s) => s.id), start: Math.max(0, Math.min(list.length - 1, start)), shuffle: !!shuffle });
 }
@@ -132,17 +148,32 @@ export const toggle = () => { if (ps.id) call('player_toggle'); };
 /**
  * Brings the playing song's row into view. Without `force` it scrolls only when the row is
  * outside the visible area (used on song change). With `force` (clicking the player bar) it
- * always centres the row, first going back to the page the queue was started from if the song
- * is not in the current list, and flashes the row.
+ * always centres the row, first going back to the page the queue was started from (songs,
+ * playlist or favorites) if the song is not in the current list, and flashes the row. Without a
+ * known source it only looks in the current list.
  */
 export function revealNow(force) {
   const id = ps.id;
   if (!id) return;
-  let i = ctx.view && ctx.view.vlist ? ctx.list.findIndex((s) => s.id === id) : -1;
+  const find = () => (ctx.view && ctx.view.vlist ? ctx.list.findIndex((s) => s.id === id) : -1);
+  let i = find();
   if (i < 0 && force && source) {
     ctx.showSource(source);
-    i = ctx.view && ctx.view.vlist ? ctx.list.findIndex((s) => s.id === id) : -1;
+    i = find();
+    const pid = source.tab === 'fav' ? FAV : source.tab === 'pl' ? source.pl : null;
+    if (i < 0 && pid != null && !cachedItems(pid)) {
+      // the page shows "loading" and renders once its items arrive (that render runs first)
+      const tab = source.tab;
+      loadItems(pid).then(() => {
+        if (ps.id === id && ctx.state.tab === tab && (tab === 'fav' || ctx.state.pl === pid)) scrollToRow(find(), id, true);
+      }, () => {});
+      return;
+    }
   }
+  scrollToRow(i, id, force);
+}
+
+function scrollToRow(i, id, force) {
   if (i < 0) return;
   const vl = ctx.view.vlist;
   vl.scrollToIndex(i, force ? 'center' : 'reveal', 'smooth');
@@ -167,6 +198,7 @@ export function initPlayer(c) {
   $('plnow').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); revealNow(true); } };
   $('playpause').onclick = toggle;
   $('plsave').onclick = () => { if (songById(ps.id)) saveSongs([ps.id], $('plsave'), ctx); };
+  $('queuebtn').onclick = () => toggleQueue();
   $('next').onclick = () => call('player_next');
   $('prev').onclick = () => call('player_prev');
   $('shuffle').onclick = () => call('player_set_shuffle', { on: !ps.shuffle });

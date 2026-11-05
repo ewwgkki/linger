@@ -72,8 +72,11 @@ export const SORTS = [['a', 'sort.artist'], ['t', 'sort.title'], ['b', 'sort.alb
 export const rowHeight = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-h')) || 72;
 export const DETAIL_H = 56;
 
-/** One song row (and its detail panel when open). Playlist rows may be `missing` (file gone from the library). */
-export function rowHtml(ctx, s, q) {
+/**
+ * One song row (and its detail panel when open). Playlist rows may be `missing` (file gone from the library).
+ * `grip`: a drag handle in front (playlist pages in custom order).
+ */
+export function rowHtml(ctx, s, q, grip = false) {
   const { state, caps } = ctx;
   const ok = playable(s, caps);
   const artist = s.a ? `<button class="link" data-artist="${esc(s.a)}">${hl(s.a, q)}</button>` : `<span class="unk">${esc(t('song.unknownArtist'))}</span>`;
@@ -82,14 +85,14 @@ export function rowHtml(ctx, s, q) {
   const why = s.missing ? t('playlist.missingTip') : !s.av ? t('song.offline') : !ok ? t('song.needFfmpeg', { fmt: fmtLabel(s) }) : '';
   const open = state.open === s.id && !s.missing;
   const sel = !!(ctx.sel && ctx.sel.ids.has(s.id));
-  const cls = `song${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}${sel ? ' sel' : ''}`;
+  const cls = `song${grip ? ' has-grip' : ''}${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}${sel ? ' sel' : ''}`;
   const saved = isSaved(s.id);
   const heart = s.missing ? '' : `<button class="rbtn heart${saved ? ' on' : ''}" type="button" data-heart="${esc(s.id)}" aria-pressed="${saved}" aria-label="${esc(t('menu.saveTo'))}" title="${esc(t('menu.saveTo'))}">${icon(saved ? 'heart-f' : 'heart')}</button>`;
   const play = ok
     ? `<button class="rbtn play" type="button" data-play="${esc(s.id)}" aria-label="${esc(t('song.playAria', { t: s.t }))}" title="${esc(t('song.play'))}">`
     : `<button class="rbtn play" type="button" disabled aria-label="${esc(why)}" title="${esc(why)}">`;
   const row = `<div class="${cls}" data-id="${esc(s.id)}" tabindex="0" role="button" aria-expanded="${open}"${why ? ` title="${esc(why)}"` : ''}>
-    ${art(s)}
+    ${grip ? gripHtml() : ''}${art(s)}
     <div class="s-main">
       <div class="s-l1"><span class="eq"><i></i><i></i><i></i></span>${s.n && state.album != null ? `<span class="tn">${String(s.n).padStart(2, '0')}</span>` : ''}<span class="t">${hl(s.t, q)}</span>${s.missing ? `<span class="lost">${esc(t('playlist.missing'))}</span>` : badges(s)}</div>
       <div class="s-l2">${album}${artist}</div>
@@ -106,6 +109,9 @@ export function rowHtml(ctx, s, q) {
     <button class="btn" type="button" data-copy="${esc(s.id)}">${esc(t('detail.copyPath'))}</button></div>`;
   return `<div class="vgrp">${row}${det}</div>`;
 }
+
+/** Drag handle for reorderable rows (see reorder.js). */
+export const gripHtml = () => `<button class="grip" type="button" data-grip aria-label="${esc(t('reorder.handle'))}" title="${esc(t('reorder.handle'))}">${icon('grip')}</button>`;
 
 /** Renders the songs page into `el`. Returns { list, vlist, refresh() }. */
 export function renderSongs(el, ctx) {

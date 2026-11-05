@@ -111,7 +111,10 @@
       </div>
       <div class="seek"><span id="tcur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" data-i18n-aria-label="player.seek"><span id="tdur">0:00</span></div>
     </div>
-    <div class="vol"><svg class="i"><use href="#i-vol"/></svg><input type="range" id="vol" min="0" max="100" value="100" data-i18n-aria-label="player.volume"></div>
+    <div class="pl-right">
+      <button class="tbtn" id="queuebtn" type="button" aria-pressed="false" aria-controls="queue" data-i18n-title="queue.open" data-i18n-aria-label="queue.title"><svg class="i"><use href="#i-list"/></svg></button>
+      <div class="vol"><svg class="i"><use href="#i-vol"/></svg><input type="range" id="vol" min="0" max="100" value="100" data-i18n-aria-label="player.volume"></div>
+    </div>
     <div class="perr" id="perr" hidden></div>
   </div>
 </div>
@@ -125,6 +128,16 @@
   <button class="btn danger-o" type="button" data-sel="remove" id="selremove"><svg class="i"><use href="#i-trash"/></svg><span id="selremovetxt"></span></button>
   <button class="icon-btn sel-x" type="button" data-sel="clear" data-i18n-title="sel.clear" data-i18n-aria-label="sel.clear"><svg class="i"><use href="#i-x"/></svg></button>
 </div>
+
+<aside class="queue" id="queue" aria-labelledby="queuetitle" hidden>
+  <div class="q-head"><h2 id="queuetitle" data-i18n="queue.title"></h2><button class="icon-btn" id="queueclose" type="button" data-i18n-title="common.close" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <div class="q-body" id="qbody">
+    <section id="qnowsec" hidden><h3 data-i18n="queue.now"></h3><div class="q-list" id="qnow" role="list"></div></section>
+    <section id="qupsec" hidden><div class="q-h"><h3 data-i18n="queue.up"></h3><button class="q-clear" id="qclear" type="button" data-i18n="queue.clear"></button></div><div class="q-list" id="qup" role="list"></div></section>
+    <section id="qctxsec" hidden><h3 id="qctxh"></h3><div class="q-list" id="qctx" role="list"></div><p class="q-more" id="qmore" hidden></p></section>
+    <div class="q-empty" id="qempty" hidden><svg class="i"><use href="#i-list"/></svg><p><b data-i18n="queue.empty"></b><br><span data-i18n="queue.emptyText"></span></p></div>
+  </div>
+</aside>
 
 <div class="menu" id="menu" role="menu" data-i18n-aria-label="menu.label" hidden></div>
 <div class="savepicker" id="savepicker" role="dialog" data-i18n-aria-label="save.title" hidden></div>
