@@ -1,7 +1,138 @@
 <!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><title>Linger · 余音</title>
-<style>body{margin:0;height:100vh;display:grid;place-items:center;background:#15131f;color:#eee;font:32px system-ui,sans-serif}</style>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Linger · 余音</title>
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
 </head>
-<body>Linger · 余音</body>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5M8 22h8"/></symbol>
+  <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5h2v14H6zm13 .9v12.2a1 1 0 0 1-1.55.83L9 12.83a1 1 0 0 1 0-1.66l8.45-5.1A1 1 0 0 1 19 6.9z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM5 6.9v10.2a1 1 0 0 0 1.55.83L15 12.83a1 1 0 0 0 0-1.66l-8.45-5.1A1 1 0 0 0 5 6.9z"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M2 2l20 20M5.8 5.8A7 7 0 0 0 7 19h9.5M21 15.5A4.5 4.5 0 0 0 17.5 10H16a7 7 0 0 0-6.4-4.9"/></symbol>
+</svg>
+
+<div class="app" id="app">
+  <aside class="side" id="side">
+    <div class="logo">
+      <svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="17" fill="#1c1b1a"/><circle cx="18" cy="18" r="11.5" fill="none" stroke="#6f6c67" stroke-opacity=".6"/><circle cx="18" cy="18" r="8" fill="none" stroke="#6f6c67" stroke-opacity=".4"/><circle cx="18" cy="18" r="5.5" fill="var(--accent)"/><circle cx="18" cy="18" r="1.6" fill="#1c1b1a"/></svg>
+      <div><b data-i18n="app.name"></b><small id="libsum">&mdash;</small></div>
+    </div>
+    <div>
+      <h4 data-i18n="side.library"></h4>
+      <nav class="nav" role="tablist" id="nav">
+        <button role="tab" data-tab="songs"><svg class="i"><use href="#i-note"/></svg><span data-i18n="nav.songs"></span><span class="n" id="n-songs"></span></button>
+        <button role="tab" data-tab="artists"><svg class="i"><use href="#i-mic"/></svg><span data-i18n="nav.artists"></span><span class="n" id="n-artists"></span></button>
+        <button role="tab" data-tab="albums"><svg class="i"><use href="#i-disc"/></svg><span data-i18n="nav.albums"></span><span class="n" id="n-albums"></span></button>
+      </nav>
+    </div>
+    <div>
+      <h4 data-i18n="side.quality"></h4>
+      <div class="qbar" id="qbar" role="img" data-i18n-aria-label="side.qualityBar"></div>
+      <div class="fl" id="qnav"></div>
+    </div>
+    <div id="rootsec" hidden>
+      <h4 data-i18n="side.folders"></h4>
+      <div class="fl" id="rootnav"></div>
+    </div>
+    <div class="side-foot" id="scanline"></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <div class="topbar" id="topbar">
+      <button class="icon-btn menu-btn" id="menubtn" type="button" data-i18n-aria-label="top.menu"><svg class="i"><use href="#i-menu"/></svg></button>
+      <div class="search">
+        <svg class="i"><use href="#i-search"/></svg>
+        <input id="q" type="search" data-i18n-placeholder="top.searchPlaceholder" autocomplete="off" spellcheck="false" data-i18n-aria-label="top.search">
+        <button class="clear" id="clearq" type="button" data-i18n-aria-label="top.clearSearch" hidden><svg class="i" style="width:14px;height:14px"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="refresh" type="button" data-i18n-title="top.refreshTip"><svg class="i"><use href="#i-refresh"/></svg><span class="txt" data-i18n="top.refresh"></span></button>
+        <button class="btn" id="opensettings" type="button" data-i18n-title="top.foldersTip"><svg class="i"><use href="#i-folder"/></svg><span class="txt" data-i18n="top.folders"></span></button>
+      </div>
+      <div class="mtabs"><div class="seg" id="mtabs">
+        <button data-tab="songs" data-i18n="nav.songs"></button><button data-tab="artists" data-i18n="nav.artists"></button><button data-tab="albums" data-i18n="nav.albums"></button>
+      </div></div>
+    </div>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<div class="player" id="player" hidden>
+  <div class="pl-in">
+    <div class="pl-now" id="plnow" data-i18n-title="player.reveal" role="button" tabindex="0"><span id="plcv"></span><div class="np"><div class="np-t" id="nptitle">&mdash;</div><div class="np-a" id="npartist"></div></div></div>
+    <div class="pl-mid">
+      <div class="transport">
+        <button class="tbtn minor" id="shuffle" type="button" aria-pressed="false" data-i18n-title="player.shuffle" data-i18n-aria-label="player.shuffle"><svg class="i"><use href="#i-shuffle"/></svg></button>
+        <button class="tbtn minor" id="prev" type="button" data-i18n-title="player.prev" data-i18n-aria-label="player.prev"><svg class="i f"><use href="#i-prev"/></svg></button>
+        <button class="tbtn big" id="playpause" type="button" data-i18n-title="player.playPause" data-i18n-aria-label="player.play"><svg class="i f"><use href="#i-play" id="ppicon"/></svg></button>
+        <button class="tbtn" id="next" type="button" data-i18n-title="player.next" data-i18n-aria-label="player.next"><svg class="i f"><use href="#i-next"/></svg></button>
+        <button class="tbtn minor" id="repeat" type="button" aria-pressed="false" data-i18n-title="player.repeatOff" data-i18n-aria-label="player.repeatOff"><svg class="i"><use href="#i-repeat"/></svg></button>
+      </div>
+      <div class="seek"><span id="tcur">0:00</span><input type="range" id="seek" min="0" max="1000" value="0" data-i18n-aria-label="player.seek"><span id="tdur">0:00</span></div>
+    </div>
+    <div class="vol"><svg class="i"><use href="#i-vol"/></svg><input type="range" id="vol" min="0" max="100" value="100" data-i18n-aria-label="player.volume"></div>
+    <div class="perr" id="perr" hidden></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite">
+  <div class="toast-row"><svg class="i" id="toasticon"><use href="#i-refresh"/></svg><div class="toast-msg" id="toastmsg"></div><button class="toast-x" id="toastx" type="button" data-i18n-aria-label="common.close">&times;</button></div>
+  <div class="progress" id="toastprog"><i></i></div>
+  <div class="toast-acts" id="toastacts"></div>
+</div>
+
+<dialog id="settings">
+  <form method="dialog" class="dlg" id="settingsform">
+    <div class="dlg-head"><h2 data-i18n="settings.title"></h2><button class="icon-btn" value="close" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-body">
+      <section>
+        <p class="hint" data-i18n="settings.intro"></p>
+        <div class="rootlist" id="rootlist"></div>
+        <div class="row">
+          <button class="btn primary" type="button" id="addfolder"><svg class="i"><use href="#i-folder"/></svg><span data-i18n="settings.addFolder"></span></button>
+          <span class="hint" id="rootsmsg"></span>
+        </div>
+      </section>
+      <section>
+        <h3 data-i18n="settings.scan"></h3>
+        <p class="hint" id="scaninfo"></p>
+        <div class="progress" id="scanprog" hidden><i></i></div>
+        <p class="hint" id="scanmsg" aria-live="polite"></p>
+        <ul class="skips" id="skips" hidden></ul>
+        <div class="row">
+          <button class="btn dark" type="button" id="scanbtn"><svg class="i"><use href="#i-refresh"/></svg><span data-i18n="settings.startScan"></span></button>
+        </div>
+        <p class="hint" data-i18n="settings.scanHint"></p>
+      </section>
+      <section>
+        <h3 data-i18n="settings.ffmpeg"></h3>
+        <p class="hint" id="ffmpeginfo"></p>
+      </section>
+    </div>
+  </form>
+</dialog>
+
+</body>
 </html>
