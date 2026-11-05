@@ -1,6 +1,8 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
 // URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
-// &pl=0 (start without playlists or favorites).
+// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1 (screenshots only: selects rows
+// 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
+// menu1: plays the first playable row and opens the menu for row 4 alone).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -212,8 +214,15 @@ export function createMock() {
     player_set_volume: ({ volume }) => { ps.volume = volume; pushState(); },
     player_set_shuffle: ({ on }) => { ps.shuffle = !!on; pushState(); },
     player_set_repeat: ({ mode }) => { ps.repeat = mode; pushState(); },
+    player_queue_add: ({ ids, next }) => {
+      if (!ps.id) { queue = ids.slice(); load(0); return; }
+      if (next) queue.splice(qi + 1, 0, ...ids);
+      else queue.push(...ids);
+    },
     player_state: () => ({ ...ps }),
   };
+
+  if (qs.get('shot')) setTimeout(() => shot(qs.get('shot')), 1200);
 
   return {
     async invoke(cmd, args = {}) {
@@ -227,4 +236,30 @@ export function createMock() {
       return () => subs.set(ev, subs.get(ev).filter((x) => x !== cb));
     },
   };
+}
+
+/** Screenshot setup: there is no right click in a headless browser, so drive the UI with synthetic events. */
+function shot(what) {
+  const rows = () => [...document.querySelectorAll('#songlist .song')];
+  const click = (el, o) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...o }));
+  if (rows().length < 8) return;
+  // the headless capture resizes the window, which would close the menu / popover
+  if (what !== 'sel') window.addEventListener('resize', (e) => e.stopImmediatePropagation(), true);
+  if (what === 'menu1') {
+    // one song: play another one first (player bar heart), then right-click a row
+    const pb = document.querySelector('#songlist [data-play]');
+    if (pb) click(pb);
+    const row = rows()[4], box = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 260, clientY: box.top + 30 }));
+    return;
+  }
+  // re-query each time: a click re-renders the rows
+  click(rows()[0], { ctrlKey: true });
+  click(rows()[3], { shiftKey: true });
+  click(rows()[5], { ctrlKey: true });
+  click(rows()[6], { ctrlKey: true });
+  if (what === 'sel') return;
+  const row = rows()[1], box = row.getBoundingClientRect();
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left + 260, clientY: box.top + 30 }));
+  if (what === 'picker') setTimeout(() => document.querySelector('#menu [data-act="save"]').click(), 50);
 }

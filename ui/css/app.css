@@ -319,3 +319,55 @@ dialog.small{width:min(420px,calc(100vw - 24px))}
 .dlg-acts{display:flex;gap:10px;justify-content:flex-end}
 .btn.danger{background:var(--danger);color:#fff;border-color:var(--danger)}
 .btn.danger:hover{filter:brightness(1.06)}
+
+/* Selection, hearts, context menu, "save to" popover */
+.songs .song{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.song.sel{background:color-mix(in srgb,var(--accent) 11%,var(--surface));box-shadow:inset 3px 0 0 var(--accent)}
+.song.sel:hover,.song.sel.open{background:color-mix(in srgb,var(--accent) 16%,var(--surface))}
+.rbtn.heart{color:var(--faint);visibility:hidden}
+.rbtn.heart svg.i{width:18px;height:18px}
+.rbtn.heart.on{visibility:visible;color:var(--accent)}
+.rbtn.heart:hover{color:var(--accent)}
+.song:hover .rbtn.heart,.song.sel .rbtn.heart,.song:focus-within .rbtn.heart{visibility:visible}
+.pl-left{display:flex;align-items:center;gap:4px;min-width:0}
+.pl-left .pl-now{flex:0 1 auto;min-width:0}
+#plsave{color:var(--muted);flex:none}
+#plsave.on{color:var(--accent)}
+.selbar{position:fixed;left:var(--side-w);right:0;margin:0 auto;width:max-content;max-width:calc(100vw - var(--side-w) - 24px);bottom:calc(var(--player-h) + 16px);z-index:35;display:flex;align-items:center;gap:6px;padding:6px 6px 6px 18px;background:var(--surface);border:1px solid var(--line);border-radius:999px;box-shadow:var(--shadow);animation:up .2s ease-out}
+.sel-n{font-weight:600;font-size:13.5px;white-space:nowrap;margin-right:6px;font-variant-numeric:tabular-nums}
+.selbar .btn{padding:6px 12px}
+.selbar .sel-x{width:32px;height:32px;border:0;color:var(--muted)}
+.selbar .sel-x:hover{background:var(--surface-2)}
+.btn.danger-o{color:var(--danger)}
+.menu,.savepicker{position:fixed;left:0;top:0;z-index:60;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+.menu{min-width:200px;max-width:min(320px,calc(100vw - 16px));padding:5px;display:flex;flex-direction:column}
+.m-item{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:7px 12px;border-radius:7px;font-size:13.5px;cursor:pointer;color:var(--ink);white-space:nowrap}
+.m-item:hover,.m-item:focus{background:var(--surface-2)}
+.m-item svg.i{width:16px;height:16px;color:var(--muted)}
+.m-item[disabled]{opacity:.45;cursor:default;background:none}
+.m-item.danger,.m-item.danger svg.i{color:var(--danger)}
+.m-sep{height:1px;background:var(--line);margin:4px 8px}
+.savepicker{width:290px;max-width:calc(100vw - 16px);padding:6px;display:flex;flex-direction:column;gap:2px}
+.sp-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 10px 6px;font-weight:600;font-size:14px}
+.sp-head span{font-weight:400;font-size:12px;color:var(--muted)}
+.sp-filter{font:inherit;font-size:13.5px;margin:0 4px 4px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.sp-filter:focus{outline:none;border-color:var(--accent)}
+.sp-rows{max-height:min(320px,50vh);overflow-y:auto;display:flex;flex-direction:column}
+.sp-row{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13.5px;min-width:0;color:var(--ink)}
+.sp-row:hover,.sp-row:focus{background:var(--surface-2)}
+.sp-row>svg.i{width:16px;height:16px;color:var(--muted)}
+.sp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.sp-box{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--faint);display:grid;place-items:center;flex:none;color:var(--accent-ink)}
+.sp-row[aria-checked="true"] .sp-box,.sp-row[aria-checked="mixed"] .sp-box{background:var(--accent);border-color:var(--accent)}
+.sp-box svg.i{width:13px;height:13px;stroke-width:3}
+.sp-box i{width:9px;height:2px;border-radius:1px;background:currentColor}
+.sp-foot{display:flex;align-items:center;gap:6px;padding:8px 4px 2px;border-top:1px solid var(--line);margin-top:4px}
+.sp-foot>span{flex:1}
+.sp-foot .btn{padding:5px 12px;font-size:12.5px}
+.sp-foot .sp-new{border-color:transparent;color:var(--link);padding-left:6px}
+@media (max-width:760px){
+  .rbtn.heart:not(.on){display:none}
+  .selbar{left:0;max-width:calc(100vw - 24px);padding-left:14px;gap:2px}
+  .selbar .btn{border:0;padding:6px 8px}
+  .selbar .btn span{display:none}
+}

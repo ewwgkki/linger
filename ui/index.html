@@ -97,7 +97,10 @@
 
 <div class="player" id="player" hidden>
   <div class="pl-in">
-    <div class="pl-now" id="plnow" data-i18n-title="player.reveal" role="button" tabindex="0"><span id="plcv"></span><div class="np"><div class="np-t" id="nptitle">&mdash;</div><div class="np-a" id="npartist"></div></div></div>
+    <div class="pl-left">
+      <div class="pl-now" id="plnow" data-i18n-title="player.reveal" role="button" tabindex="0"><span id="plcv"></span><div class="np"><div class="np-t" id="nptitle">&mdash;</div><div class="np-a" id="npartist"></div></div></div>
+      <button class="tbtn heart" id="plsave" type="button" aria-pressed="false" data-i18n-title="menu.saveTo" data-i18n-aria-label="menu.saveTo"><svg class="i"><use href="#i-heart" id="plsaveicon"/></svg></button>
+    </div>
     <div class="pl-mid">
       <div class="transport">
         <button class="tbtn minor" id="shuffle" type="button" aria-pressed="false" data-i18n-title="player.shuffle" data-i18n-aria-label="player.shuffle"><svg class="i"><use href="#i-shuffle"/></svg></button>
@@ -112,6 +115,19 @@
     <div class="perr" id="perr" hidden></div>
   </div>
 </div>
+
+<div class="selbar" id="selbar" role="toolbar" data-i18n-aria-label="sel.bar" hidden>
+  <span class="sel-n" id="seln"></span>
+  <button class="btn" type="button" data-sel="play" data-i18n-title="menu.play"><svg class="i f"><use href="#i-play"/></svg><span data-i18n="menu.play"></span></button>
+  <button class="btn" type="button" data-sel="next" data-i18n-title="menu.playNext"><svg class="i f"><use href="#i-next"/></svg><span data-i18n="menu.playNext"></span></button>
+  <button class="btn" type="button" data-sel="queue" data-i18n-title="menu.addQueue"><svg class="i"><use href="#i-list"/></svg><span data-i18n="menu.addQueue"></span></button>
+  <button class="btn" type="button" data-sel="save" data-i18n-title="menu.saveTo"><svg class="i"><use href="#i-heart"/></svg><span data-i18n="menu.saveTo"></span></button>
+  <button class="btn danger-o" type="button" data-sel="remove" id="selremove"><svg class="i"><use href="#i-trash"/></svg><span id="selremovetxt"></span></button>
+  <button class="icon-btn sel-x" type="button" data-sel="clear" data-i18n-title="sel.clear" data-i18n-aria-label="sel.clear"><svg class="i"><use href="#i-x"/></svg></button>
+</div>
+
+<div class="menu" id="menu" role="menu" data-i18n-aria-label="menu.label" hidden></div>
+<div class="savepicker" id="savepicker" role="dialog" data-i18n-aria-label="save.title" hidden></div>
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite">
   <div class="toast-row"><svg class="i" id="toasticon"><use href="#i-refresh"/></svg><div class="toast-msg" id="toastmsg"></div><button class="toast-x" id="toastx" type="button" data-i18n-aria-label="common.close">&times;</button></div>

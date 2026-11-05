@@ -3,6 +3,7 @@ import { t } from '../i18n.js';
 import { esc, mmss, hm, norm, fmtLabel, playable, coverUrl, icon } from '../util.js';
 import { selectSongs, info } from '../library.js';
 import { mountVList } from '../vlist.js';
+import { isSaved } from '../playlists.js';
 
 export const QUALITIES = [
   { k: 'lossless', color: '--q-lossless' },
@@ -80,7 +81,10 @@ export function rowHtml(ctx, s, q) {
     ? `<button class="link" data-album="${esc(s.b)}">${t('song.album', { b: hl(s.b, q) })}</button><span class="sep">-</span>` : '';
   const why = s.missing ? t('playlist.missingTip') : !s.av ? t('song.offline') : !ok ? t('song.needFfmpeg', { fmt: fmtLabel(s) }) : '';
   const open = state.open === s.id && !s.missing;
-  const cls = `song${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}`;
+  const sel = !!(ctx.sel && ctx.sel.ids.has(s.id));
+  const cls = `song${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}${sel ? ' sel' : ''}`;
+  const saved = isSaved(s.id);
+  const heart = s.missing ? '' : `<button class="rbtn heart${saved ? ' on' : ''}" type="button" data-heart="${esc(s.id)}" aria-pressed="${saved}" aria-label="${esc(t('menu.saveTo'))}" title="${esc(t('menu.saveTo'))}">${icon(saved ? 'heart-f' : 'heart')}</button>`;
   const play = ok
     ? `<button class="rbtn play" type="button" data-play="${esc(s.id)}" aria-label="${esc(t('song.playAria', { t: s.t }))}" title="${esc(t('song.play'))}">`
     : `<button class="rbtn play" type="button" disabled aria-label="${esc(why)}" title="${esc(why)}">`;
@@ -91,7 +95,7 @@ export function rowHtml(ctx, s, q) {
       <div class="s-l2">${album}${artist}</div>
     </div>
     <div class="s-right">
-      <span class="dur">${mmss(s.s)}</span>
+      ${heart}<span class="dur">${mmss(s.s)}</span>
       ${play}<svg class="i f" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11"/><path d="M10 8.2v7.6a.6.6 0 0 0 .9.5l6-3.8a.6.6 0 0 0 0-1l-6-3.8a.6.6 0 0 0-.9.5z" fill="var(--surface)"/></svg></button>
     </div></div>`;
   if (!open) return row;

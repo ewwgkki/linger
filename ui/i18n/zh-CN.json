@@ -192,5 +192,27 @@
   "dlg.ok": "确定",
   "dlg.cancel": "取消",
   "dlg.create": "创建",
-  "dlg.save": "保存"
+  "dlg.save": "保存",
+
+  "menu.label": "歌曲操作",
+  "menu.play": "播放",
+  "menu.playNext": "下一首播放",
+  "menu.addQueue": "添加到队列",
+  "menu.saveTo": "收藏到…",
+  "menu.viewArtist": "查看歌手",
+  "menu.viewAlbum": "查看专辑",
+  "menu.copyPath": "复制路径",
+  "menu.copied": "已复制文件路径",
+  "menu.removeFromPl": "从歌单移除",
+  "menu.removeFromFav": "从我喜欢的音乐移除",
+  "menu.queued": "已把 {n} 首添加到队列",
+  "menu.queuedNext": "{n} 首将在下一首播放",
+
+  "sel.bar": "已选歌曲",
+  "sel.count": "已选 {n} 首",
+  "sel.clear": "取消选择",
+
+  "save.title": "收藏到",
+  "save.filter": "搜索歌单",
+  "save.done": "完成"
 }

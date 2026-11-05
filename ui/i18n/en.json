@@ -192,5 +192,27 @@
   "dlg.ok": "OK",
   "dlg.cancel": "Cancel",
   "dlg.create": "Create",
-  "dlg.save": "Save"
+  "dlg.save": "Save",
+
+  "menu.label": "Song actions",
+  "menu.play": "Play",
+  "menu.playNext": "Play next",
+  "menu.addQueue": "Add to queue",
+  "menu.saveTo": "Save to…",
+  "menu.viewArtist": "Go to artist",
+  "menu.viewAlbum": "Go to album",
+  "menu.copyPath": "Copy path",
+  "menu.copied": "File path copied",
+  "menu.removeFromPl": "Remove from playlist",
+  "menu.removeFromFav": "Remove from Liked songs",
+  "menu.queued": "Added {n} songs to the queue",
+  "menu.queuedNext": "{n} songs will play next",
+
+  "sel.bar": "Selected songs",
+  "sel.count": "{n} selected",
+  "sel.clear": "Clear selection",
+
+  "save.title": "Save to",
+  "save.filter": "Filter playlists",
+  "save.done": "Done"
 }

@@ -6,10 +6,13 @@ import { info } from './library.js';
 import { renderSongs, QUALITIES, qLabel, rootLabel, fullPath, rowHeight } from './views/songs.js';
 import { renderShelf } from './views/shelf.js';
 import { renderPlaylist, defaultPlSort } from './views/playlist.js';
-import { initPlayer, playList, markRows, libraryChanged } from './player.js';
+import { initPlayer, playList, markRows, libraryChanged, showSaved } from './player.js';
 import { initSettings, openSettings, toast } from './settings.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
+import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
+import { openSongMenu, closeMenus, playIds, queueIds, removeIds, savableIds } from './menu.js';
+import { saveSongs } from './savepicker.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -33,12 +36,16 @@ export const ctx = {
   view: null,
   /** True once the first get_library has returned. */
   loaded: false,
+  /** Selected rows of the current list (song ids), kept across re-renders. */
+  sel: createSelection(),
   render: () => render(),
   sidebar: () => sidebar(),
   /** Plays `list` (already filtered to playable songs) from `start`. */
   playList: (list, start, shuffle) => playList(list, start, shuffle),
   openSettings: () => { closeDrawer(); openSettings(); },
   openPlaylist: (id) => openPlaylist(id),
+  goArtist: (a) => go({ artist: a, album: null, sort: { col: 'b', dir: 1 } }),
+  goAlbum: (b) => go({ album: b, artist: null, sort: { col: 'n', dir: 1 } }),
   /** After a `playlists://changed` (data already re-fetched): update the sidebar and the open page. */
   playlistsChanged: (c) => playlistsChanged(c),
   /** Goes back to the page with the given filters (where a queue was started). */
@@ -147,8 +154,76 @@ function render() {
   } else {
     renderShelf($('view'), ctx, state.tab);
     ctx.view = null;
+    ctx.list = [];
   }
+  pruneSelection(ctx.sel, listIds());
+  paintSel();
 }
+
+// ---------- selection ----------
+const listIds = () => ctx.list.map((s) => s.id);
+const selIds = () => selectedInOrder(ctx.sel, listIds());
+/** Playlist item ids of the selected rows (playlist pages). */
+const itemIdsOf = (ids) => { const set = new Set(ids); return ctx.list.filter((s) => set.has(s.id) && s._i != null).map((s) => s._i); };
+
+/** Marks the selected rows that are rendered and shows the selection bar for 2+ songs. */
+function paintSel() {
+  document.querySelectorAll('#songlist .song').forEach((r) => r.classList.toggle('sel', ctx.sel.ids.has(r.dataset.id)));
+  const n = ctx.sel.ids.size;
+  $('selbar').hidden = n < 2;
+  if (n < 2) return;
+  $('seln').textContent = t('sel.count', { n });
+  $('selremove').hidden = !isPlTab(state.tab);
+  $('selremove').title = $('selremovetxt').textContent = t(state.tab === 'pl' ? 'menu.removeFromPl' : 'menu.removeFromFav');
+}
+
+function clearSel() {
+  if (!ctx.sel.ids.size && ctx.sel.anchor == null) return;
+  clearSelection(ctx.sel);
+  paintSel();
+}
+
+$('selbar').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sel]'); if (!b) return;
+  const ids = selIds(), act = b.dataset.sel;
+  if (act === 'play') playIds(ids, ctx);
+  else if (act === 'next' || act === 'queue') queueIds(ids, act === 'next', ctx);
+  else if (act === 'save') saveSongs(savableIds(ids, ctx), b, ctx);
+  else if (act === 'remove') removeIds(ids, ctx, state.tab === 'pl' ? itemIdsOf(ids) : undefined);
+  else if (act === 'clear') clearSel();
+});
+
+/** Context menu for `row` at (x, y): the whole selection when the row is in it, else just this row. */
+function rowMenu(row, x, y) {
+  const id = row.dataset.id;
+  if (!ctx.sel.ids.has(id)) { clickSelect(ctx.sel, listIds(), id, {}); paintSel(); }
+  const ids = selIds();
+  openSongMenu(x, y, ids, ctx, { itemIds: state.tab === 'pl' ? itemIdsOf(ids) : undefined });
+}
+
+/** Set by a long press so the click that follows it is ignored. */
+let pressedAt = -Infinity;
+$('view').addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('.song');
+  if (!row || e.target.closest('input,textarea')) return;
+  e.preventDefault();
+  if (performance.now() - pressedAt < 1000) return; // already opened by the long press
+  let { clientX: x, clientY: y } = e;
+  if (!x && !y) { const r = row.getBoundingClientRect(); x = r.left + 80; y = r.bottom - 8; } // keyboard (menu key, Shift+F10)
+  rowMenu(row, x, y);
+});
+// Long press (touch, pen) = right click.
+let press = null;
+$('view').addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;
+  const row = e.target.closest('.song');
+  if (!row || e.target.closest('button,a')) return;
+  const p = { x: e.clientX, y: e.clientY, timer: setTimeout(() => { press = null; pressedAt = performance.now(); rowMenu(row, p.x, p.y); }, 500) };
+  press = p;
+});
+const cancelPress = () => { if (press) { clearTimeout(press.timer); press = null; } };
+$('view').addEventListener('pointermove', (e) => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress(); });
+['pointerup', 'pointercancel'].forEach((ev) => $('view').addEventListener(ev, cancelPress));
 
 const playableList = () => ctx.list.filter((s) => playable(s, ctx.caps));
 function toggleOpen(id) {
@@ -186,10 +261,19 @@ $('view').addEventListener('click', (e) => {
   if (srt) { const c = srt.dataset.sort; state.sort = { col: c, dir: state.sort.col === c ? -state.sort.dir : (c === 's' || c === 'br' ? -1 : 1) }; render(); return; }
   const cp = tg.closest('[data-copy]');
   if (cp) { copyPath(cp); return; }
+  const hb = tg.closest('[data-heart]');
+  if (hb) { saveSongs([hb.dataset.heart], hb, ctx); return; }
   if (tg.closest('a,button')) return;
   const row = tg.closest('.song');
-  if (row) toggleOpen(row.dataset.id);
+  if (!row) return;
+  if (performance.now() - pressedAt < 1000) { pressedAt = -Infinity; return; } // the end of a long press
+  const id = row.dataset.id, ctrl = e.ctrlKey || e.metaKey, shift = e.shiftKey;
+  clickSelect(ctx.sel, listIds(), id, { ctrl, shift });
+  if (!ctrl && !shift) toggleOpen(id);
+  paintSel();
 });
+// Shift+click selects a range: keep the browser from selecting text too.
+$('view').addEventListener('mousedown', (e) => { if (e.shiftKey && e.target.closest('.song')) e.preventDefault(); });
 
 function copyPath(btn) {
   const s = ctx.lib.songs.find((x) => x.id === btn.dataset.copy);
@@ -284,6 +368,8 @@ function playlistsChanged(c) {
   const had = knownPl;
   knownPl = new Set(pl.list.map((p) => p.id));
   sidebarPl();
+  showSaved();
+  if (ctx.view) ctx.view.refresh(); // hearts
   if (state.tab === 'pl' && !knownPl.has(state.pl)) {
     if (had.has(state.pl)) switchTab('songs', true); // deleted (maybe elsewhere)
     else if (ctx.loaded) render(); // first load: show "not found"
@@ -303,7 +389,16 @@ $('clearq').onclick = () => { resetSearch(); render(); $('q').focus(); };
 document.addEventListener('keydown', (e) => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open || $('namedlg').open || $('confirmdlg').open;
   if (e.key === '/' && !typing) { e.preventDefault(); $('q').focus(); }
-  if (e.key === 'Escape') closeDrawer();
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing && ctx.view && ctx.list.length) {
+    e.preventDefault();
+    selectAll(ctx.sel, listIds());
+    paintSel();
+  }
+  if (e.key === 'Escape') {
+    closeDrawer();
+    closeMenus();
+    if (!typing) clearSel();
+  }
 });
 window.addEventListener('scroll', () => $('topbar').classList.toggle('scrolled', scrollY > 4), { passive: true });
 // Row height changes at the narrow breakpoint.

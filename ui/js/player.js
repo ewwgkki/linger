@@ -4,6 +4,8 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss, trackSlider } from './util.js';
 import { art, badges, artistName } from './views/songs.js';
+import { isSaved } from './playlists.js';
+import { saveSongs } from './savepicker.js';
 
 const $ = (id) => document.getElementById(id);
 const REPEAT_NEXT = { all: 'one', one: 'off', off: 'all' };
@@ -47,6 +49,17 @@ function renderNow() {
   $('plcv').innerHTML = s ? art(s, 'note', 'sm') : '';
   $('nptitle').innerHTML = s ? `${esc(s.t)} ${badges(s)}` : '&mdash;';
   $('npartist').textContent = s ? [artistName(s.a), s.b].filter(Boolean).join(' · ') : '';
+  showSaved();
+}
+
+/** Heart next to the title: filled when the playing song is in favorites or a playlist. */
+export function showSaved() {
+  if (!ctx) return;
+  const on = !!ps.id && isSaved(ps.id);
+  $('plsaveicon').setAttribute('href', on ? '#i-heart-f' : '#i-heart');
+  $('plsave').setAttribute('aria-pressed', String(on));
+  $('plsave').classList.toggle('on', on);
+  $('plsave').hidden = !songById(ps.id);
 }
 
 /** Highlights the playing row among the rendered rows. */
@@ -153,6 +166,7 @@ export function initPlayer(c) {
   $('plnow').onclick = () => revealNow(true);
   $('plnow').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); revealNow(true); } };
   $('playpause').onclick = toggle;
+  $('plsave').onclick = () => { if (songById(ps.id)) saveSongs([ps.id], $('plsave'), ctx); };
   $('next').onclick = () => call('player_next');
   $('prev').onclick = () => call('player_prev');
   $('shuffle').onclick = () => call('player_set_shuffle', { on: !ps.shuffle });
