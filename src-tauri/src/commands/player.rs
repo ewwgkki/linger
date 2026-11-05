@@ -479,6 +479,7 @@ pub fn player_set_shuffle(on: bool, app: AppHandle, state: State<'_, AppState>) 
     i.queue.set_shuffle(on);
     save(&state, "shuffle", if on { "true" } else { "false" });
     emit_state(&app, &i);
+    emit_queue(&app); // toggling rebuilds the source order
 }
 
 #[tauri::command]
