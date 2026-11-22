@@ -107,7 +107,15 @@ pub fn http_post_form(
 
 fn is_cover(title: &str) -> bool {
     let t = title.to_lowercase();
-    ["原唱", "翻唱", "翻自", "cover"].iter().any(|m| t.contains(m))
+    if ["原唱", "翻唱", "翻自"].iter().any(|m| t.contains(m)) {
+        return true;
+    }
+    let b = t.as_bytes();
+    t.match_indices("cover").any(|(i, m)| {
+        let before = i == 0 || !b[i - 1].is_ascii_alphanumeric();
+        let after = b.get(i + m.len()).map_or(true, |c| !c.is_ascii_alphanumeric());
+        before && after
+    })
 }
 
 /// Strict auto-match: normalized title equal, artist sets intersect, duration within 3 s.
@@ -173,6 +181,71 @@ mod tests {
         assert!(pick_best(&cv, &q("晴天", "周杰伦", 269.0)).is_none());
         let en = [cand("Yesterday (Cover)", "The Beatles", 125.0, true, "1")];
         assert!(pick_best(&en, &q("Yesterday", "The Beatles", 125.0)).is_none());
+    }
+
+    #[test]
+    fn cover_is_whole_word_only() {
+        for t in ["Recover", "Discovery", "Undercover"] {
+            let c = [cand(t, "B", 100.0, true, "1")];
+            assert!(pick_best(&c, &q(t, "B", 100.0)).is_some(), "{t}");
+        }
+        for t in ["Song (Cover)", "Cover by X", "Song - cover"] {
+            let c = [cand(t, "B", 100.0, true, "1")];
+            assert!(pick_best(&c, &q(t, "B", 100.0)).is_none(), "{t}");
+        }
+    }
+
+    fn stub(response: Vec<u8>) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/x", l.local_addr().unwrap());
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut req = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = s.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                req.extend_from_slice(&buf[..n]);
+            }
+            let _ = s.write_all(&response);
+            String::from_utf8_lossy(&req).lines().next().unwrap_or("").to_string()
+        });
+        (url, h)
+    }
+
+    fn resp(status: &str, body: &[u8]) -> Vec<u8> {
+        let mut v = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+        v.extend_from_slice(body);
+        v
+    }
+
+    #[test]
+    fn http_statuses_and_body_cap() {
+        let (u, h) = stub(resp("404 Not Found", b"{}"));
+        assert_eq!(http_get(&u, &[], &[]), Ok(None));
+        h.join().unwrap();
+        for st in ["429 Too Many Requests", "500 Internal Server Error"] {
+            let (u, h) = stub(resp(st, b"x"));
+            assert_eq!(http_get(&u, &[], &[]), Err(NetError), "{st}");
+            h.join().unwrap();
+        }
+        let (u, h) = stub(resp("200 OK", &vec![b'a'; 2 * 1024 * 1024 + 1]));
+        assert_eq!(http_get(&u, &[], &[]), Err(NetError));
+        let _ = h.join();
+        let (u, h) = stub(resp("200 OK", b"ok"));
+        assert_eq!(http_get(&u, &[], &[]), Ok(Some("ok".into())));
+        h.join().unwrap();
+    }
+
+    #[test]
+    fn query_is_percent_encoded() {
+        let (u, h) = stub(resp("200 OK", b"ok"));
+        http_get(&u, &[("track_name", "A & B 晴天")], &[]).unwrap();
+        let line = h.join().unwrap();
+        assert!(line.contains("track_name=A%20%26%20B%20%E6%99%B4%E5%A4%A9") || line.contains("track_name=A+%26+B+%E6%99%B4%E5%A4%A9"), "{line}");
     }
 
     #[test]

@@ -35,6 +35,19 @@ pub fn parse_search(json: &str) -> Vec<Candidate> {
         .collect()
 }
 
+/// False when `result` is present but not an object, or `songs` is present but not an array
+/// (e.g. encrypted responses); such replies must not be read as "no results".
+pub fn search_shape_ok(json: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(json) else {
+        return false;
+    };
+    match v.get("result") {
+        None | Some(Value::Null) => true,
+        Some(Value::Object(o)) => matches!(o.get("songs"), None | Some(Value::Null) | Some(Value::Array(_))),
+        Some(_) => false,
+    }
+}
+
 fn lyric_of(v: &Value, k: &str) -> Option<String> {
     v.get(k)?
         .get("lyric")?
@@ -91,6 +104,9 @@ impl Provider for Netease {
         let form = [("s", s.trim()), ("type", "1"), ("limit", "10"), ("offset", "0")];
         let body = http_post_form("https://music.163.com/api/cloudsearch/pc", &form, &HEADERS)?.ok_or(NetError)?;
         checked(&body)?;
+        if !search_shape_ok(&body) {
+            return Err(NetError);
+        }
         Ok(parse_search(&body))
     }
 
@@ -133,6 +149,16 @@ mod tests {
         assert!(parse_lyric("9", r#"{"code":200,"nolyric":true}"#).is_none());
         assert!(parse_lyric("9", r#"{"code":200,"lrc":{"lyric":""},"tlyric":{"lyric":""}}"#).is_none());
         assert!(parse_lyric("9", r#"{"code":200,"lrc":{"lyric":"[00:00.00]纯音乐，请欣赏"}}"#).is_none());
+    }
+
+    #[test]
+    fn search_shape_checks() {
+        assert!(!search_shape_ok(r#"{"code":200,"result":"35b17489"}"#));
+        assert!(!search_shape_ok(r#"{"code":200,"result":[]}"#));
+        assert!(!search_shape_ok(r#"{"code":200,"result":{"songs":"x"}}"#));
+        assert!(search_shape_ok(r#"{"code":200,"result":{}}"#));
+        assert!(search_shape_ok(r#"{"code":200,"result":{"songs":[]}}"#));
+        assert!(search_shape_ok(r#"{"code":200,"result":{"songCount":0}}"#));
     }
 
     #[test]

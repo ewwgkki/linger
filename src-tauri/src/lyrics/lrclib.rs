@@ -52,8 +52,13 @@ pub fn parse_search(json: &str) -> Vec<Candidate> {
         .collect()
 }
 
-fn valid_json(s: &str) -> Result<(), NetError> {
-    serde_json::from_str::<Value>(s).map(|_| ()).map_err(|_| NetError)
+/// 200 bodies must be a JSON object (track) or array (search); anything else is a failure.
+fn shape_ok(s: &str, array: bool) -> Result<(), NetError> {
+    match serde_json::from_str::<Value>(s) {
+        Ok(Value::Array(_)) if array => Ok(()),
+        Ok(Value::Object(_)) if !array => Ok(()),
+        _ => Err(NetError),
+    }
 }
 
 impl Provider for Lrclib {
@@ -71,7 +76,7 @@ impl Provider for Lrclib {
             params.push(("duration", dur.as_str()));
         }
         if let Some(body) = http_get(&format!("{BASE}/get"), &params, &[("User-Agent", UA)])? {
-            valid_json(&body)?;
+            shape_ok(&body, false)?;
             return Ok(parse_track(&body));
         }
         // 404: fall back to search + strict match
@@ -86,7 +91,7 @@ impl Provider for Lrclib {
         let params = [("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
         match http_get(&format!("{BASE}/search"), &params, &[("User-Agent", UA)])? {
             Some(body) => {
-                valid_json(&body)?;
+                shape_ok(&body, true)?;
                 Ok(parse_search(&body))
             }
             None => Ok(Vec::new()),
@@ -99,7 +104,7 @@ impl Provider for Lrclib {
         }
         match http_get(&format!("{BASE}/get/{ext_id}"), &[], &[("User-Agent", UA)])? {
             Some(body) => {
-                valid_json(&body)?;
+                shape_ok(&body, false)?;
                 Ok(parse_track(&body))
             }
             None => Ok(None),
@@ -126,6 +131,15 @@ mod tests {
         assert!(parse_track(r#"{"code":404,"name":"NotFound","message":"x"}"#).is_none());
         assert!(parse_track(r#"{"id":1,"instrumental":true,"plainLyrics":null,"syncedLyrics":""}"#).is_none());
         assert!(parse_track("not json").is_none());
+    }
+
+    #[test]
+    fn lrclib_wrong_shape_is_error() {
+        assert_eq!(shape_ok("[]", false), Err(NetError));
+        assert_eq!(shape_ok("{}", true), Err(NetError));
+        assert_eq!(shape_ok("\"x\"", true), Err(NetError));
+        assert_eq!(shape_ok("{}", false), Ok(()));
+        assert_eq!(shape_ok("[]", true), Ok(()));
     }
 
     #[test]
