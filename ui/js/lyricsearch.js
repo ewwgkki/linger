@@ -3,6 +3,7 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss } from './util.js';
 import { ly, subscribe, choose, useFile } from './lyrics.js';
+import { pickStillValid } from './lyricsmodel.js';
 
 const $ = (id) => document.getElementById(id);
 let ctx = null;
@@ -81,14 +82,18 @@ async function pickFile() {
 
 async function useLocal() {
   if (busy) return;
+  const id = songId;
+  // the picker stays open for as long as the user likes: the song may change meanwhile
+  const valid = () => pickStillValid(id, ly.id, $('lyricsdlg').open && songId === id);
   let path;
   try {
     path = await pickFile();
   } catch (e) {
     console.error('lyrics file dialog', e);
-    say(t('lyrics.badFile'), true);
+    if (valid()) say(t('lyrics.badFile'), true);
     return;
   }
+  if (!valid()) return;
   if (Array.isArray(path)) path = path[0];
   if (path) apply(() => useFile(path));
 }

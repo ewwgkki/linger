@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill } from '../js/lyricsmodel.js';
+import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill, pickStillValid } from '../js/lyricsmodel.js';
 
 const L = (start, text = 'x') => ({ start, end: null, text, words: [], trans: null });
 
@@ -180,4 +180,12 @@ test('store: a failed settings save restores the switch and rejects', async () =
   assert.equal(L.ly.netease, true);
   await assert.rejects(L.setTrans(false));
   assert.equal(L.ly.trans, true);
+});
+
+test('pickStillValid: a picked file applies only to the song it was picked for', () => {
+  assert.equal(pickStillValid('a', 'a', true), true);
+  assert.equal(pickStillValid('a', 'b', true), false); // song changed while the picker was open
+  assert.equal(pickStillValid('a', null, true), false); // playback stopped
+  assert.equal(pickStillValid('a', 'a', false), false); // dialog closed meanwhile
+  assert.equal(pickStillValid(null, null, true), false); // no song at all
 });

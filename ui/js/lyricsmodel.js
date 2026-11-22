@@ -57,6 +57,11 @@ export function seekTarget(line, offset) {
   return Math.max(0, line.start - (offset || 0));
 }
 
+/** A file picked for song `idBefore` may be used only if that song is still playing and its dialog still open. */
+export function pickStillValid(idBefore, idNow, dialogOpen) {
+  return !!idBefore && idBefore === idNow && !!dialogOpen;
+}
+
 /** Auto-scroll gate: after `touch(now)` (the user scrolled) `allowed` is false for `ms`. */
 export function scrollGate(ms) {
   let until = -Infinity;
