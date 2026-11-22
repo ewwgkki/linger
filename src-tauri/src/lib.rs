@@ -82,6 +82,14 @@ pub fn run() {
             commands::playlists::get_memberships,
             commands::playlists::save_songs,
             commands::import::import_spotify,
+            commands::lyrics::lyrics_get,
+            commands::lyrics::lyrics_search,
+            commands::lyrics::lyrics_choose,
+            commands::lyrics::lyrics_use_file,
+            commands::lyrics::lyrics_set_offset,
+            commands::lyrics::lyrics_settings,
+            commands::lyrics::lyrics_set_settings,
+            commands::lyrics::cover_color,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Linger");

@@ -46,6 +46,31 @@ pub fn thumbnail(bytes: &[u8], max: u32) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Dominant color of an image: shrunk to 32x32, bucketed by the top 3 bits per channel, skipping
+/// near-black (luma < 24) and near-white (> 232) pixels; the mean of the fullest bucket.
+/// Falls back to the whole-image mean when every pixel is skipped. `None` if undecodable.
+pub fn dominant_color(jpeg: &[u8]) -> Option<[u8; 3]> {
+    let img = image::load_from_memory(jpeg).ok()?;
+    let small = img.resize_exact(32, 32, image::imageops::FilterType::Triangle).to_rgb8();
+    // per bucket: count and channel sums
+    let mut buckets = vec![(0u32, [0u32; 3]); 512];
+    let mut all = (0u32, [0u32; 3]);
+    for p in small.pixels() {
+        let [r, g, b] = p.0;
+        all.0 += 1;
+        for i in 0..3 { all.1[i] += p.0[i] as u32; }
+        let luma = (299 * r as u32 + 587 * g as u32 + 114 * b as u32) / 1000;
+        if !(24..=232).contains(&luma) { continue; }
+        let k = ((r >> 5) as usize) << 6 | ((g >> 5) as usize) << 3 | (b >> 5) as usize;
+        let e = &mut buckets[k];
+        e.0 += 1;
+        for i in 0..3 { e.1[i] += p.0[i] as u32; }
+    }
+    let best = buckets.iter().filter(|b| b.0 > 0).max_by_key(|b| b.0).copied().unwrap_or(all);
+    if best.0 == 0 { return None; }
+    Some([0, 1, 2].map(|i| (best.1[i] / best.0) as u8))
+}
+
 /// Cache file name for an audio file's cover: `{sha1(root, rel)[..16]}-{size}-{mtime}.jpg`.
 /// Stable across database ids (SQLite reuses `files.id`), shared by the CUE tracks of one file,
 /// and changed whenever the audio file itself changes.
@@ -179,6 +204,21 @@ mod tests {
         std::fs::write(root.join(dir).join("cover.png"), bytes).unwrap();
     }
 
+    fn solid_png(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(w, h, |x, y| image::Rgb(f(x, y)));
+        let mut out = Vec::new();
+        img.write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+        out
+    }
+    #[test] fn dominant_color_picks_main_area() {
+        let c = dominant_color(&solid_png(100, 100, |x, _| if x < 70 { [200, 30, 30] } else { [30, 30, 200] })).unwrap();
+        assert!(c[0] > c[1] && c[0] > c[2], "{c:?}");
+    }
+    #[test] fn dominant_color_ignores_black_border() {
+        let c = dominant_color(&solid_png(100, 100, |x, y| if (20..80).contains(&x) && (20..80).contains(&y) { [30, 200, 30] } else { [0, 0, 0] })).unwrap();
+        assert!(c[1] > c[0] && c[1] > c[2], "{c:?}");
+    }
+    #[test] fn garbage_image_is_none() { assert!(dominant_color(&[1, 2, 3, 4, 5, 6, 7, 8]).is_none()); }
     #[test] fn thumbnail_shrinks_long_side() { assert_eq!(dims(&thumbnail(&png(1000, 800), 360).unwrap()), (360, 288)); }
     #[test] fn thumbnail_keeps_small_images() { assert_eq!(dims(&thumbnail(&png(200, 200), 360).unwrap()), (200, 200)); }
     #[test] fn bad_image_returns_none() { assert!(thumbnail(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 360).is_none()); }
