@@ -5,3 +5,4 @@ pub mod local;
 pub mod online;
 pub mod lrclib;
 pub mod netease;
+pub mod resolve;

@@ -76,7 +76,19 @@ const MIGRATIONS: &[&str] = &[
        added INTEGER NOT NULL);",
     // when the file was put in its folder (creation time); filled in by the scanner
     "ALTER TABLE files ADD COLUMN added INTEGER;",
+    // v4: lyrics cache + per-song offset. Deliberately NO foreign key to songs (cache survives rescans).
+    "CREATE TABLE lyrics(song_id TEXT PRIMARY KEY, status TEXT NOT NULL, source TEXT, ext_id TEXT,
+       lrc TEXT, yrc TEXT, trans TEXT, plain TEXT, pinned INTEGER NOT NULL DEFAULT 0, fetched INTEGER NOT NULL);
+     CREATE TABLE lyrics_offset(song_id TEXT PRIMARY KEY, offset_ms INTEGER NOT NULL);",
 ];
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LyricRow {
+    pub status: String, // "ok" | "none"
+    pub source: Option<String>, pub ext_id: Option<String>,
+    pub lrc: Option<String>, pub yrc: Option<String>, pub trans: Option<String>, pub plain: Option<String>,
+    pub pinned: bool, pub fetched: i64,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot { pub title: String, pub artist: String, pub album: String, pub duration: f64, pub size: u64 }
@@ -341,6 +353,31 @@ impl Db {
         let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? as u64, r.get(3)?)))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(v)
+    }
+    pub fn lyric(&self, song_id: &str) -> Result<Option<LyricRow>> {
+        Ok(self.conn.query_row(
+            "SELECT status, source, ext_id, lrc, yrc, trans, plain, pinned, fetched FROM lyrics WHERE song_id=?1",
+            [song_id], |r| Ok(LyricRow {
+                status: r.get(0)?, source: r.get(1)?, ext_id: r.get(2)?, lrc: r.get(3)?, yrc: r.get(4)?,
+                trans: r.get(5)?, plain: r.get(6)?, pinned: r.get::<_, i64>(7)? != 0, fetched: r.get(8)?,
+            })).optional()?)
+    }
+    pub fn put_lyric(&self, song_id: &str, row: &LyricRow) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO lyrics(song_id, status, source, ext_id, lrc, yrc, trans, plain, pinned, fetched)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![song_id, row.status, row.source, row.ext_id, row.lrc, row.yrc, row.trans, row.plain,
+                    row.pinned as i64, row.fetched])?;
+        Ok(())
+    }
+    /// 0 when the song has no stored offset.
+    pub fn lyric_offset(&self, song_id: &str) -> Result<i32> {
+        Ok(self.conn.query_row("SELECT offset_ms FROM lyrics_offset WHERE song_id=?1", [song_id],
+            |r| r.get::<_, i32>(0)).optional()?.unwrap_or(0))
+    }
+    pub fn set_lyric_offset(&self, song_id: &str, ms: i32) -> Result<()> {
+        self.conn.execute("INSERT OR REPLACE INTO lyrics_offset(song_id, offset_ms) VALUES(?1,?2)", params![song_id, ms])?;
+        Ok(())
     }
     pub fn song_count(&self) -> Result<usize> {
         Ok(self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get::<_, i64>(0))? as usize)
@@ -689,6 +726,22 @@ mod tests {
              mk(db, "c.mp3", "C", "x", 103, 30.0), mk(db, "d.mp3", "D", "x", 104, 40.0)]
     }
 
+    #[test] fn migrates_to_v4_keeps_data() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        migrate_with(&mut c, &MIGRATIONS[..3]).unwrap();
+        c.execute("INSERT INTO playlists(name,created,updated) VALUES('p',1,1)", []).unwrap();
+        let db = Db::init(c).unwrap();
+        assert_eq!(schema_version(db.conn()).unwrap(), 4);
+        assert_eq!(db.playlists().unwrap().len(), 1);
+        assert_eq!(db.lyric("x").unwrap(), None);
+        let row = LyricRow { status: "ok".into(), source: Some("lrclib".into()), lrc: Some("[00:01.00]a".into()),
+                             pinned: true, fetched: 9, ..Default::default() };
+        db.put_lyric("x", &row).unwrap();
+        assert_eq!(db.lyric("x").unwrap(), Some(row));
+        assert_eq!(db.lyric_offset("x").unwrap(), 0);
+        db.set_lyric_offset("x", -250).unwrap();
+        assert_eq!(db.lyric_offset("x").unwrap(), -250);
+    }
     #[test] fn migrates_v1_to_v2() {
         let mut c = rusqlite::Connection::open_in_memory().unwrap();
         migrate_with(&mut c, &MIGRATIONS[..1]).unwrap();
