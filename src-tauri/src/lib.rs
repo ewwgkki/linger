@@ -1,4 +1,5 @@
 pub mod import;
+pub mod lyrics;
 pub mod commands;
 pub mod cover;
 pub mod cue;
