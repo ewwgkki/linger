@@ -5,7 +5,7 @@ import { api } from '../api.js';
 import { mountVList } from '../vlist.js';
 import { attachReorder } from '../reorder.js';
 import { pl, FAV, cachedItems, loadItems, itemsToRows, selectRows, errKey, moveCached, refetchItems } from '../playlists.js';
-import { art, withCover, rowHtml, rowHeight, SORTS, DETAIL_H, chips, pageQualityBar, toolbarLeft } from './songs.js';
+import { art, withCover, rowHtml, rowHeight, SORTS, chips, pageQualityBar, toolbarLeft } from './songs.js';
 import { byPageQuality } from '../filters.js';
 import { toast } from '../settings.js';
 
@@ -86,16 +86,11 @@ export function renderPlaylist(el, ctx) {
   // drag to reorder: playlists in custom order (either direction), unfiltered
   const grip = !fav && col === 'pos' && !q && !state.pageQ && list.length > 1;
   el.innerHTML = html + `<div class="songs${grip ? ' reorderable' : ''}" id="songlist"></div>`;
-  const expanded = () => {
-    const i = state.open ? list.findIndex((s) => s.id === state.open && !s.missing) : -1;
-    return i >= 0 ? { index: i, extra: DETAIL_H } : null;
-  };
   const box = el.querySelector('#songlist');
   const vlist = mountVList(box, {
     count: list.length,
     rowH: rowHeight(),
     render: (i) => rowHtml(ctx, list[i], q, grip),
-    expanded: expanded(),
   });
   const detach = grip ? attachReorder(box, {
     rowH: rowHeight,
@@ -103,11 +98,6 @@ export function renderPlaylist(el, ctx) {
     count: () => list.length,
     scroller: window,
     bounds: visibleBand,
-    onStart() {
-      if (!state.open) return;
-      state.open = null;
-      vlist.update({ expanded: null });
-    },
     onMove(from, to) {
       const n = list.length, real = (i) => (dir < 0 ? n - 1 - i : i);
       const row = list[from];
@@ -115,7 +105,7 @@ export function renderPlaylist(el, ctx) {
       // optimistic: `list` is also ctx.list
       list.splice(to, 0, ...list.splice(from, 1));
       moveCached(id, row._i, real(to));
-      vlist.update({ expanded: expanded() });
+      vlist.update({});
       if (refocus) vlist.node(to)?.querySelector('[data-grip]')?.focus({ preventScroll: true });
       api.invoke('playlist_move', { id, itemId: row._i, to: real(to) }).catch((e) => {
         toast(t(errKey(e)), { icon: 'x', autoHide: 6000 });
@@ -126,7 +116,7 @@ export function renderPlaylist(el, ctx) {
   return {
     list,
     vlist,
-    refresh: () => vlist.update({ rowH: rowHeight(), expanded: expanded() }),
+    refresh: () => vlist.update({ rowH: rowHeight() }),
     destroy() { if (detach) detach(); vlist.destroy(); },
   };
 }

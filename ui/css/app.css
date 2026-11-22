@@ -115,7 +115,6 @@ svg.f{fill:currentColor;stroke:none}
 .song.now{background:var(--accent-soft)}
 .song.flash{animation:flash 1.2s ease-out}
 @keyframes flash{0%,30%{box-shadow:inset 0 0 0 2px var(--accent)}100%{box-shadow:inset 0 0 0 2px transparent}}
-.song.open{background:var(--surface-2)}
 .song .art{width:56px}
 .s-main{min-width:0;display:flex;flex-direction:column;gap:4px}
 .s-l1{display:flex;align-items:center;gap:6px;min-width:0}
@@ -144,7 +143,6 @@ body.playing .eq i{animation:eq .9s ease-in-out infinite alternate}
 .link:hover{text-decoration:underline;text-underline-offset:3px}
 .unk{color:var(--faint)}
 mark{background:color-mix(in srgb,var(--accent) 25%,transparent);color:inherit;border-radius:3px;padding:0 1px}
-.detail{margin:0 10px 6px 80px;padding:10px 14px;border-radius:10px;background:var(--surface-2);font-size:13px;color:var(--muted);display:flex;gap:8px 18px;flex-wrap:wrap;align-items:center}
 .path{font-family:var(--mono);font-size:12.5px;color:var(--ink);word-break:break-all;flex:1 1 320px;min-width:0}
 .sorts{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .sorts .seg button[aria-pressed="true"]::after{content:attr(data-dir);margin-left:3px;color:var(--accent)}
@@ -262,7 +260,6 @@ details.help .hint{margin-top:8px}
   .song .art{width:48px}
   :root{--row-h:64px}
   .dur,.rbtn.dl{display:none}
-  .detail{margin-left:6px;margin-right:6px}
   .grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:20px 14px}
   .pl-in{grid-template-columns:minmax(0,1fr) auto;padding:10px 16px;gap:8px 12px}
   .pl-mid{display:contents}
@@ -281,7 +278,6 @@ details.help .hint{margin-top:8px}
 /* Desktop additions */
 .songs .song{height:var(--row-h)}
 .vpad{flex:none}
-.vgrp{display:flex;flex-direction:column}
 .song.off{cursor:default}
 .song.off .art,.song.off .s-main,.song.off .dur{opacity:.45}
 .song.off:hover{background:none}
@@ -318,6 +314,10 @@ details.help .hint{margin-top:8px}
 .song.missing .s-l2,.song.missing .art,.song.missing .dur{opacity:.45}
 .song.missing .t{opacity:.55}
 dialog.small{width:min(420px,calc(100vw - 24px))}
+#songinfo{width:min(520px,calc(100vw - 24px))}
+.info-list{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px 18px;margin:0 0 18px;font-size:14px}
+.info-list dt{color:var(--muted);white-space:nowrap}
+.info-list dd{margin:0;color:var(--ink);overflow-wrap:anywhere;user-select:text}
 .dlg-body .field{font:inherit;font-size:15px;width:100%;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .dlg-body .field:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
 #namedlg .dlg-body,#confirmdlg .dlg-body{gap:14px}
@@ -331,6 +331,8 @@ dialog.small{width:min(420px,calc(100vw - 24px))}
 .songs .song{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .song.sel{background:color-mix(in srgb,var(--accent) 11%,var(--surface));box-shadow:inset 3px 0 0 var(--accent)}
 .song.sel:hover,.song.sel.open{background:color-mix(in srgb,var(--accent) 16%,var(--surface))}
+.rbtn.np-go{display:none;color:var(--accent)}
+.song.now .rbtn.np-go{display:grid}
 .rbtn.heart{color:var(--faint);visibility:hidden}
 .rbtn.heart svg.i{width:18px;height:18px}
 .rbtn.heart.on{visibility:visible;color:var(--accent)}

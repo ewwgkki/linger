@@ -8,7 +8,7 @@ import { renderShelf } from './views/shelf.js';
 import { renderPlaylist, defaultPlSort } from './views/playlist.js';
 import { initPlayer, playList, markRows, libraryChanged, showSaved } from './player.js';
 import { initSettings, openSettings, openImport, startScan, toast } from './settings.js';
-import { enterPage } from './filters.js';
+import { enterPage, sortScope, rememberedSort, pruneSorts } from './filters.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
@@ -17,7 +17,7 @@ import { saveSongs, pickerOpen } from './savepicker.js';
 import { initQueue } from './queue.js';
 import { initLyrics } from './lyrics.js';
 import { initLyricsPanel } from './lyricspanel.js';
-import { initNowPlaying, nowPlayingOpen } from './nowplaying.js';
+import { initNowPlaying, nowPlayingOpen, openNowPlaying, openNowPlayingFor } from './nowplaying.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -26,7 +26,7 @@ const store = {
 };
 
 // tab: songs | artists | albums | fav | pl (with pl = playlist id); plSort is the sort on fav / pl pages.
-const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, pageQ: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count', pl: null, plSort: null };
+const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, pageQ: null, sort: { col: 'a', dir: 1 }, shelfSort: 'count', pl: null, plSort: null };
 const isPlTab = (tab) => tab === 'fav' || tab === 'pl';
 /** Shared with views and the player / settings modules. */
 export const ctx = {
@@ -50,6 +50,8 @@ export const ctx = {
   openSettings: () => { closeDrawer(); openSettings(); },
   openImport: () => { closeDrawer(); openImport(); },
   openPlaylist: (id) => openPlaylist(id),
+  /** Full-screen lyrics for a song that is playing or was just asked to play. */
+  openFullLyrics: (id) => openNowPlayingFor(id),
   goArtist: (a) => go({ artist: a, album: null, sort: { col: 'b', dir: 1 } }),
   goAlbum: (b) => go({ album: b, artist: null, sort: { col: 'n', dir: 1 } }),
   /** After a `playlists://changed` (data already re-fetched): update the sidebar and the open page. */
@@ -79,6 +81,7 @@ async function loadLibrary() {
   ctx.songsById = new Map(ctx.lib.songs.map((s) => [s.id, s]));
   ctx.caps = { ffmpeg: !!lib.ffmpeg };
   ctx.loaded = true;
+  forgetSorts('root', ctx.lib.roots.map((r) => r.id));
   if (state.root != null && !ctx.lib.roots.some((r) => r.id === state.root)) { state.root = null; state.pageQ = null; }
   sidebar();
   render();
@@ -130,6 +133,25 @@ function syncSide() {
   });
 }
 
+// ---------- remembered sort per folder / list ----------
+const DEFAULT_SORT = { col: 'a', dir: 1 };
+const loadSorts = () => { const m = store.get('pageSort', {}); return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; };
+let pageSorts = loadSorts();
+const sortFor = (page, fallback) => { const k = sortScope(page); return k ? rememberedSort(pageSorts, k, fallback) : fallback; };
+const plSortFor = (tab, id) => sortFor({ tab, pl: id }, defaultPlSort(tab));
+function rememberSort(sort) {
+  const k = sortScope(state);
+  if (!k) return;
+  pageSorts = { ...pageSorts, [k]: { col: sort.col, dir: sort.dir } };
+  store.set('pageSort', pageSorts);
+}
+function forgetSorts(kind, ids) {
+  const next = pruneSorts(pageSorts, kind, ids);
+  if (Object.keys(next).length === Object.keys(pageSorts).length) return;
+  pageSorts = next;
+  store.set('pageSort', pageSorts);
+}
+
 /** Clears every filter and the search box, then applies the page being entered. */
 function enter(patch) {
   enterPage(state, patch);
@@ -141,7 +163,8 @@ function pushNav(url) {
 }
 /** A sidebar folder or quality: a songs page of its own. */
 function enterSongs(patch) {
-  enter({ tab: 'songs', pl: null, plSort: null, sort: { col: 'a', dir: 1 }, ...patch });
+  const page = { tab: 'songs', pl: null, plSort: null, artist: null, album: null, root: null, ...patch };
+  enter({ ...page, sort: sortFor(page, DEFAULT_SORT) });
   pushNav('#songs');
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
@@ -268,9 +291,9 @@ $('view').addEventListener('pointermove', (e) => { if (press && Math.hypot(e.cli
 ['pointerup', 'pointercancel'].forEach((ev) => $('view').addEventListener(ev, cancelPress));
 
 const playableList = () => ctx.list.filter((s) => playable(s, ctx.caps));
-function toggleOpen(id) {
-  state.open = state.open === id ? null : id;
-  if (ctx.view) ctx.view.refresh();
+function playRow(id) {
+  const l = playableList(), i = l.findIndex((s) => s.id === id);
+  if (i >= 0) ctx.playList(l, i, false);
 }
 
 $('view').addEventListener('click', (e) => {
@@ -286,6 +309,7 @@ $('view').addEventListener('click', (e) => {
   if (ps) {
     const c = ps.dataset.psort, cur = state.plSort || defaultPlSort(state.tab);
     state.plSort = { col: c, dir: cur.col === c ? -cur.dir : (c === 's' || c === 'br' || c === 'ad' ? -1 : 1) };
+    rememberSort(state.plSort);
     render(); return;
   }
   if (tg.closest('#playall')) { ctx.playList(playableList(), 0, false); return; }
@@ -294,22 +318,21 @@ $('view').addEventListener('click', (e) => {
   if (ss) { state.shelfSort = ss.dataset.v; store.set('shelfSort', state.shelfSort); render(); return; }
   const pq = tg.closest('[data-pageq]');
   if (pq) {
-    state.pageQ = pq.dataset.pageq || null; state.open = null;
+    state.pageQ = pq.dataset.pageq || null;
     try { history.replaceState(navState(), ''); } catch (_) { /* ignore */ }
     render();
     return;
   }
   const cl = tg.closest('[data-clear]');
-  if (cl) { const k = cl.dataset.clear; if (k === 'q') resetSearch(); else state[k] = null; state.open = null; render(); return; }
+  if (cl) { const k = cl.dataset.clear; if (k === 'q') resetSearch(); else state[k] = null; render(); return; }
   const pb = tg.closest('[data-play]');
   if (pb) { e.stopPropagation(); const l = playableList(); ctx.playList(l, l.findIndex((s) => s.id === pb.dataset.play), false); return; }
   const a = tg.closest('[data-artist]'), b = tg.closest('[data-album]');
   if (a) { e.stopPropagation(); go({ artist: a.dataset.artist, album: null, sort: { col: 'b', dir: 1 } }); return; }
   if (b) { e.stopPropagation(); go({ album: b.dataset.album, artist: null, sort: { col: 'n', dir: 1 } }); return; }
   const srt = tg.closest('[data-sort]');
-  if (srt) { const c = srt.dataset.sort; state.sort = { col: c, dir: state.sort.col === c ? -state.sort.dir : (c === 's' || c === 'br' || c === 'fa' ? -1 : 1) }; render(); return; }
-  const cp = tg.closest('[data-copy]');
-  if (cp) { copyPath(cp); return; }
+  if (srt) { const c = srt.dataset.sort; state.sort = { col: c, dir: state.sort.col === c ? -state.sort.dir : (c === 's' || c === 'br' || c === 'fa' ? -1 : 1) }; rememberSort(state.sort); render(); return; }
+  if (tg.closest('[data-fullscreen]')) { openNowPlaying(); return; }
   const hb = tg.closest('[data-heart]');
   if (hb) { saveSongs([hb.dataset.heart], hb, ctx); return; }
   if (tg.closest('a,button')) return;
@@ -317,25 +340,15 @@ $('view').addEventListener('click', (e) => {
   if (!row) return;
   if (performance.now() - pressedAt < 1000) { pressedAt = -Infinity; return; } // the end of a long press
   const id = row.dataset.id, ctrl = e.ctrlKey || e.metaKey, shift = e.shiftKey;
+  if (e.detail > 1 && !ctrl && !shift) {
+    if (e.detail === 2) playRow(id);
+    return;
+  }
   clickSelect(ctx.sel, listIds(), id, { ctrl, shift });
-  if (!ctrl && !shift) toggleOpen(id);
   paintSel();
 });
 // Shift+click selects a range: keep the browser from selecting text too.
 $('view').addEventListener('mousedown', (e) => { if (e.shiftKey && e.target.closest('.song')) e.preventDefault(); });
-
-function copyPath(btn) {
-  const s = ctx.lib.songs.find((x) => x.id === btn.dataset.copy);
-  if (!s) return;
-  const done = () => { btn.textContent = t('detail.copied'); setTimeout(() => { btn.textContent = t('detail.copyPath'); }, 1500); };
-  const fallback = () => {
-    const el = document.getElementById('path-' + s.id); if (!el) return;
-    const r = document.createRange(); r.selectNodeContents(el); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
-    btn.textContent = t('detail.selected');
-  };
-  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(fullPath(ctx.lib.roots, s)).then(done).catch(fallback);
-  else fallback();
-}
 
 /** Enters an artist / album page; "back" is history navigation. */
 function go(o) {
@@ -346,39 +359,32 @@ function apply(o) {
   const tab = o.tab || 'songs';
   enter({
     tab, artist: o.artist ?? null, album: o.album ?? null, root: o.root ?? null, quality: o.quality ?? null, pageQ: o.pageQ ?? null,
-    pl: tab === 'pl' ? o.pl ?? null : null, plSort: isPlTab(tab) ? defaultPlSort(tab) : null,
+    pl: tab === 'pl' ? o.pl ?? null : null, plSort: isPlTab(tab) ? plSortFor(tab, o.pl ?? null) : null,
   });
-  if (o.sort) state.sort = o.sort;
+  if (o.sort) state.sort = sortFor(state, o.sort);
   render(); window.scrollTo({ top: 0 });
 }
 window.addEventListener('popstate', (e) => {
   const s = e.state || {}, h = fromHash();
   apply({ artist: s.artist, album: s.album, root: s.root, quality: s.quality, pageQ: s.pageQ, tab: s.tab || h.tab, pl: s.tab ? s.pl : h.pl, sort: s.sort || { col: 'a', dir: 1 } });
 });
-$('view').addEventListener('dblclick', (e) => {
-  const row = e.target.closest('.song'); if (!row || e.target.closest('button,a')) return;
-  const l = playableList(), i = l.findIndex((s) => s.id === row.dataset.id);
-  if (i >= 0) ctx.playList(l, i, false);
-});
 $('view').addEventListener('keydown', (e) => {
   const row = e.target.closest('.song');
   if (row && e.target === row && e.key === 'Enter') {
     e.preventDefault();
-    const id = row.dataset.id;
-    toggleOpen(id);
-    document.querySelector(`.song[data-id="${CSS.escape(id)}"]`)?.focus();
+    playRow(row.dataset.id);
   }
 });
 /** `replace`: replace the history entry (leaving a page that no longer exists). */
 function switchTab(tab, replace = false) {
-  enter({ tab, pl: null, plSort: isPlTab(tab) ? defaultPlSort(tab) : null });
+  enter({ tab, pl: null, plSort: isPlTab(tab) ? plSortFor(tab, null) : null });
   if (tab === 'songs') state.sort = { col: 'a', dir: 1 };
   try { history[replace ? 'replaceState' : 'pushState']({ tab }, '', '#' + tab); } catch (_) { /* ignore */ }
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
 const plHash = (tab, id) => (tab === 'pl' ? '#pl/' + id : '#' + tab);
 function openPlaylist(id) {
-  enter({ tab: 'pl', pl: id, plSort: defaultPlSort('pl') });
+  enter({ tab: 'pl', pl: id, plSort: plSortFor('pl', id) });
   try { history.pushState({ tab: 'pl', pl: id }, '', plHash('pl', id)); } catch (_) { /* ignore */ }
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
@@ -416,6 +422,7 @@ let knownPl = new Set();
 function playlistsChanged(c) {
   const had = knownPl;
   knownPl = new Set(pl.list.map((p) => p.id));
+  if (pl.loaded) forgetSorts('pl', [...knownPl]);
   sidebarPl();
   showSaved();
   if (ctx.view) ctx.view.refresh(); // hearts
@@ -433,7 +440,7 @@ function playlistsChanged(c) {
 document.querySelectorAll('#nav,#mtabs,#favnav').forEach((el) => el.addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); }));
 function resetSearch() { $('q').value = ''; state.q = ''; }
 let qt;
-$('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; state.open = null; render(); }, 120); });
+$('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value; render(); }, 120); });
 $('clearq').onclick = () => { resetSearch(); render(); $('q').focus(); };
 document.addEventListener('keydown', (e) => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open || $('namedlg').open || $('confirmdlg').open;
@@ -472,7 +479,7 @@ async function boot() {
   state.shelfSort = store.get('shelfSort', 'count');
   const h = fromHash();
   state.tab = h.tab; state.pl = h.pl;
-  state.plSort = isPlTab(state.tab) ? defaultPlSort(state.tab) : null;
+  state.plSort = isPlTab(state.tab) ? plSortFor(state.tab, state.pl) : null;
   initSettings(ctx, { loadLibrary });
   const plReady = initPlaylists(ctx);
   try {

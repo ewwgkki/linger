@@ -38,6 +38,8 @@
   <symbol id="i-grip" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></g></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4.5A1.5 1.5 0 0 1 9.5 3h5A1.5 1.5 0 0 1 16 4.5V6M5.5 6l1 13.2A2 2 0 0 0 8.5 21h7a2 2 0 0 0 2-1.8L18.5 6M10 10.5v6M14 10.5v6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"/></symbol>
   <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M4 5h16M7 10h10M4 15h16M8 20h8"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M13 20h8"/><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7.5 18.5 3 20l1.5-4.5z"/></symbol>
 </svg>
@@ -114,6 +116,7 @@
     </div>
     <div class="pl-right">
       <button class="tbtn" id="lyricsbtn" type="button" aria-pressed="false" aria-controls="lyrics" data-i18n-title="lyrics.open" data-i18n-aria-label="lyrics.title"><svg class="i"><use href="#i-lyrics"/></svg></button>
+      <button class="tbtn" id="npbtn" type="button" aria-pressed="false" aria-controls="nowplaying" data-i18n-title="np.fullLyrics" data-i18n-aria-label="np.fullLyrics"><svg class="i"><use href="#i-expand"/></svg></button>
       <button class="tbtn" id="queuebtn" type="button" aria-pressed="false" aria-controls="queue" data-i18n-title="queue.open" data-i18n-aria-label="queue.title"><svg class="i"><use href="#i-list"/></svg></button>
       <div class="vol"><svg class="i"><use href="#i-vol"/></svg><input type="range" id="vol" min="0" max="100" value="100" data-i18n-aria-label="player.volume"></div>
     </div>
@@ -245,6 +248,16 @@
       <div class="dlg-acts"><button class="btn" type="button" id="namecancel" data-i18n="dlg.cancel"></button><button class="btn primary" type="submit" id="nameok"></button></div>
     </div>
   </form>
+</dialog>
+
+<dialog id="songinfo" class="small">
+  <div class="dlg">
+    <div class="dlg-head"><h2 data-i18n="menu.details"></h2><button class="icon-btn" id="songinfox" type="button" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-body">
+      <dl class="info-list" id="songinfolist"></dl>
+      <div class="dlg-acts"><button class="btn" type="button" id="songinfocopy" data-i18n="detail.copyPath"></button><button class="btn primary" type="button" id="songinfoclose" data-i18n="common.close"></button></div>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="confirmdlg" class="small">

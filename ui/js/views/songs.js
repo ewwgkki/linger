@@ -75,10 +75,9 @@ export const SORTS = [['a', 'sort.artist'], ['t', 'sort.title'], ['b', 'sort.alb
 
 /** Row height from CSS (72px, 64px on narrow windows). */
 export const rowHeight = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row-h')) || 72;
-export const DETAIL_H = 56;
 
 /**
- * One song row (and its detail panel when open). Playlist rows may be `missing` (file gone from the library).
+ * One song row. Playlist rows may be `missing` (file gone from the library).
  * `grip`: a drag handle in front (playlist pages in custom order).
  */
 export function rowHtml(ctx, s, q, grip = false) {
@@ -88,31 +87,25 @@ export function rowHtml(ctx, s, q, grip = false) {
   const album = s.b && state.album == null
     ? `<button class="link" data-album="${esc(s.b)}">${t('song.album', { b: hl(s.b, q) })}</button><span class="sep">-</span>` : '';
   const why = s.missing ? t('playlist.missingTip') : !s.av ? t('song.offline') : !ok ? t('song.needFfmpeg', { fmt: fmtLabel(s) }) : '';
-  const open = state.open === s.id && !s.missing;
   const sel = !!(ctx.sel && ctx.sel.ids.has(s.id));
-  const cls = `song${grip ? ' has-grip' : ''}${s.id === ctx.nowId ? ' now' : ''}${open ? ' open' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}${sel ? ' sel' : ''}`;
+  const cls = `song${grip ? ' has-grip' : ''}${s.id === ctx.nowId ? ' now' : ''}${s.av ? '' : ' off'}${s.missing ? ' missing' : ''}${sel ? ' sel' : ''}`;
   const saved = isSaved(s.id);
   const heart = s.missing ? '' : `<button class="rbtn heart${saved ? ' on' : ''}" type="button" data-heart="${esc(s.id)}" aria-pressed="${saved}" aria-label="${esc(t('menu.saveTo'))}" title="${esc(t('menu.saveTo'))}">${icon(saved ? 'heart-f' : 'heart')}</button>`;
+  const full = s.missing ? '' : `<button class="rbtn np-go" type="button" data-fullscreen aria-label="${esc(t('np.fullLyrics'))}" title="${esc(t('np.fullLyrics'))}">${icon('expand')}</button>`;
   const play = ok
     ? `<button class="rbtn play" type="button" data-play="${esc(s.id)}" aria-label="${esc(t('song.playAria', { t: s.t }))}" title="${esc(t('song.play'))}">`
     : `<button class="rbtn play" type="button" disabled aria-label="${esc(why)}" title="${esc(why)}">`;
-  const row = `<div class="${cls}" data-id="${esc(s.id)}" tabindex="0" role="button" aria-expanded="${open}"${why ? ` title="${esc(why)}"` : ''}>
+  const row = `<div class="${cls}" data-id="${esc(s.id)}" tabindex="0" role="button"${why ? ` title="${esc(why)}"` : ''}>
     ${grip ? gripHtml() : ''}${art(s)}
     <div class="s-main">
       <div class="s-l1"><span class="eq"><i></i><i></i><i></i></span>${s.n && state.album != null ? `<span class="tn">${String(s.n).padStart(2, '0')}</span>` : ''}<span class="t">${hl(s.t, q)}</span>${s.missing ? `<span class="lost">${esc(t('playlist.missing'))}</span>` : badges(s)}</div>
       <div class="s-l2">${album}${artist}</div>
     </div>
     <div class="s-right">
-      ${heart}<span class="dur">${mmss(s.s)}</span>
+      ${full}${heart}<span class="dur">${mmss(s.s)}</span>
       ${play}<svg class="i f" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11"/><path d="M10 8.2v7.6a.6.6 0 0 0 .9.5l6-3.8a.6.6 0 0 0 0-1l-6-3.8a.6.6 0 0 0-.9.5z" fill="var(--surface)"/></svg></button>
     </div></div>`;
-  if (!open) return row;
-  const det = `<div class="detail">
-    <span class="path" id="path-${esc(s.id)}">${esc(fullPath(ctx.lib.roots, s))}</span>
-    <span>${esc(t('detail.info', { mb: (s.z / 1048576).toFixed(1), fmt: fmtLabel(s), br: s.br, dur: mmss(s.s) }))}</span>
-    ${s.b && state.album == null ? `<button class="btn" type="button" data-album="${esc(s.b)}">${icon('disc')}${esc(t('detail.viewAlbum'))}</button>` : ''}
-    <button class="btn" type="button" data-copy="${esc(s.id)}">${esc(t('detail.copyPath'))}</button></div>`;
-  return `<div class="vgrp">${row}${det}</div>`;
+  return row;
 }
 
 /** Drag handle for reorderable rows (see reorder.js). */
@@ -165,15 +158,10 @@ export function renderSongs(el, ctx) {
     return { list, vlist: null, refresh() {} };
   }
   el.innerHTML = hero + '<div class="songs" id="songlist"></div>';
-  const expanded = () => {
-    const i = state.open ? list.findIndex((s) => s.id === state.open) : -1;
-    return i >= 0 ? { index: i, extra: DETAIL_H } : null;
-  };
   const vlist = mountVList(el.querySelector('#songlist'), {
     count: list.length,
     rowH: rowHeight(),
     render: (i) => rowHtml(ctx, list[i], q),
-    expanded: expanded(),
   });
-  return { list, vlist, refresh: () => vlist.update({ rowH: rowHeight(), expanded: expanded() }) };
+  return { list, vlist, refresh: () => vlist.update({ rowH: rowHeight() }) };
 }

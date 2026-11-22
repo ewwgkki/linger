@@ -22,6 +22,8 @@ let prevDrawer = null;
 let shownId = null;
 let shownCover = null;
 let colorSeq = 0;
+/** song that was just asked to play and should open the page once it is current */
+let pending = { id: null, timer: 0 };
 
 function applyColors(rgb) {
   const c = backdropColors(rgb);
@@ -97,6 +99,7 @@ export function openNowPlaying() {
   closeQueue();
   prevDrawer = drawer; // after the closes above, which count as drawer changes
   $('lyricsbtn').setAttribute('aria-pressed', 'true');
+  $('npbtn').setAttribute('aria-pressed', 'true');
   $('plcover').setAttribute('aria-expanded', 'true');
   $('plcover').setAttribute('aria-label', t('np.close'));
   $('plcover').title = t('np.close');
@@ -122,6 +125,7 @@ export function closeNowPlaying() {
   clearColors();
   syncDisc();
   $('lyricsbtn').setAttribute('aria-pressed', String(lyricsOpen()));
+  $('npbtn').setAttribute('aria-pressed', 'false');
   $('plcover').setAttribute('aria-expanded', 'false');
   $('plcover').setAttribute('aria-label', t('np.open'));
   $('plcover').title = t('np.open');
@@ -130,16 +134,32 @@ export function closeNowPlaying() {
 
 const toggleNowPlaying = () => (isOpen ? closeNowPlaying() : openNowPlaying());
 
+function clearPending() {
+  clearTimeout(pending.timer);
+  pending = { id: null, timer: 0 };
+}
+
+/** Opens the page for song `id`, now if it is current, else as soon as it starts (give up after 5 s). */
+export function openNowPlayingFor(id) {
+  clearPending();
+  if (ly.id === id) { openNowPlaying(); return; }
+  pending = { id, timer: setTimeout(clearPending, 5000) };
+}
+
 export function initNowPlaying(c) {
   ctx = c;
   lyv = createLyricsView('npl', { onRender: showSong });
   $('plcover').onclick = toggleNowPlaying;
+  $('npbtn').onclick = toggleNowPlaying;
   $('nplclose').onclick = closeNowPlaying;
 
   // the page is not a scroll container: a wheel outside the lyrics must not scroll the list behind it
   $('nowplaying').addEventListener('wheel', (e) => { if (!e.target.closest('.ly-scroll')) e.preventDefault(); }, { passive: false });
 
-  subscribe(() => { if (isOpen && !ly.id) closeNowPlaying(); });
+  subscribe(() => {
+    if (isOpen && !ly.id) closeNowPlaying();
+    if (pending.id && ly.id === pending.id) { clearPending(); openNowPlaying(); }
+  });
   onClock(syncDisc);
   document.addEventListener('visibilitychange', syncDisc);
 

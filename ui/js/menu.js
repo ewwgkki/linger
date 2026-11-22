@@ -7,6 +7,7 @@ import { saveSongs, place, closePicker } from './savepicker.js';
 import { fullPath } from './views/songs.js';
 import { toast } from './settings.js';
 import { playerState, clearSource } from './player.js';
+import { openSongInfo } from './songinfo.js';
 
 const $ = (id) => document.getElementById(id);
 const showErr = (e) => toast(t(errKey(e)), { icon: 'x', autoHide: 6000 });
@@ -124,7 +125,7 @@ export function openSongMenu(x, y, ids, ctx, { itemIds } = {}) {
     items.push(['play', 'play', 'menu.play', !canPlay], ['next', 'next', 'menu.playNext', !canPlay], ['queue', 'list', 'menu.addQueue', !canPlay],
       ['save', 'heart', 'menu.saveTo', false]);
     if (one) {
-      items.push(['-']);
+      items.push(['full', 'expand', 'np.fullLyrics', !playable(one, ctx.caps)], ['-'], ['info', 'info', 'menu.details', false]);
       if (one.a) items.push(['artist', 'mic', 'menu.viewArtist', false]);
       if (one.b) items.push(['album', 'disc', 'menu.viewAlbum', false]);
       items.push(['copy', 'folder', 'menu.copyPath', false]);
@@ -137,8 +138,12 @@ export function openSongMenu(x, y, ids, ctx, { itemIds } = {}) {
   showMenu(x, y, items, (act, r) => {
     const list = rows.map((s) => s.id);
     if (act === 'play') { if (one) playFrom(one.id, ctx); else playIds(list, ctx); }
-    else if (act === 'next' || act === 'queue') queueIds(list, act === 'next', ctx);
+    else if (act === 'full') {
+      ctx.openFullLyrics(one.id);
+      if (playerState().id !== one.id) playFrom(one.id, ctx); // the current song keeps playing where it is
+    } else if (act === 'next' || act === 'queue') queueIds(list, act === 'next', ctx);
     else if (act === 'save') saveSongs(live.map((s) => s.id), { x: r.left, y: r.top }, ctx);
+    else if (act === 'info') openSongInfo(one, fullPath(ctx.lib.roots, one), copyText);
     else if (act === 'artist') ctx.goArtist(one.a);
     else if (act === 'album') ctx.goAlbum(one.b);
     else if (act === 'copy') copyText(fullPath(ctx.lib.roots, one)).then(() => done(t('menu.copied')), showErr);
