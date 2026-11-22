@@ -38,6 +38,35 @@ export function wordProgress(line, ms) {
   return clamp01((ms - line.start) / (line.end - line.start));
 }
 
+/** A line without a usable end fills until the next line; the fill never takes longer than this. */
+const MAX_FILL_MS = 10000;
+const LAST_FILL_MS = 5000;
+
+/** 0..1 fill of line `i`: like wordProgress, but a line-timed line always gets a sensible span. */
+export function lineFill(lines, i, ms) {
+  const line = lines[i];
+  if ((line.words || []).length || line.start == null) return wordProgress(line, ms);
+  const next = lines[i + 1];
+  const end = line.end > line.start ? line.end : next && next.start > line.start ? next.start : line.start + LAST_FILL_MS;
+  return wordProgress({ ...line, end: Math.min(end, line.start + MAX_FILL_MS) }, ms);
+}
+
+/** Playback position (ms) that shows `line` as current; null for an untimed line. */
+export function seekTarget(line, offset) {
+  if (!line || line.start == null) return null;
+  return Math.max(0, line.start - (offset || 0));
+}
+
+/** Auto-scroll gate: after `touch(now)` (the user scrolled) `allowed` is false for `ms`. */
+export function scrollGate(ms) {
+  let until = -Infinity;
+  return {
+    touch(now) { until = now + ms; },
+    clear() { until = -Infinity; },
+    allowed: (now) => now >= until,
+  };
+}
+
 /**
  * Playback clock in ms. `set(pos, playing, now)` takes a report from the player; `at(now)` reads the
  * interpolated position. A report slightly behind what was already shown (< 400 ms) is ignored while

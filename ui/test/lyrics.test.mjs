@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineIndex, wordProgress, wordFill, clock, latest, STALE } from '../js/lyricsmodel.js';
+import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill } from '../js/lyricsmodel.js';
 
 const L = (start, text = 'x') => ({ start, end: null, text, words: [], trans: null });
 
@@ -116,4 +116,68 @@ test('store: setOffset accumulates, last wins, failure restores; choice beats sl
   assert.equal(L.ly.data.offset, 800);
   assert.equal(L.nowMs() >= 800, true);
   L.onSong(null);
+});
+
+test('seekTarget subtracts offset', () => {
+  assert.equal(seekTarget({ start: 5000 }, 0), 5000);
+  assert.equal(seekTarget({ start: 5000 }, 500), 4500); // positive offset = lyrics earlier
+  assert.equal(seekTarget({ start: 5000 }, -500), 5500);
+  assert.equal(seekTarget({ start: 200 }, 500), 0); // never below 0
+  assert.equal(seekTarget({ start: null }, 0), null); // untimed line
+});
+
+test('autoScroll pauses after a manual scroll', () => {
+  const g = scrollGate(4000);
+  assert.equal(g.allowed(0), true);
+  g.touch(1000);
+  assert.equal(g.allowed(1000), false);
+  assert.equal(g.allowed(4999), false);
+  assert.equal(g.allowed(5000), true);
+  g.touch(6000);
+  g.clear(); // a click on a line follows at once
+  assert.equal(g.allowed(6001), true);
+});
+
+test('lineFill uses the next line when a line has no end, capped', () => {
+  const lines = [
+    { start: 1000, end: null, words: [] },
+    { start: 3000, end: 40000, words: [] },
+    { start: 40000, end: null, words: [] },
+  ];
+  assert.equal(lineFill(lines, 0, 2000), 0.5);
+  assert.equal(lineFill(lines, 1, 8000), 0.5); // a long gap fills over 10 s at most
+  assert.equal(lineFill(lines, 1, 13000), 1);
+  assert.equal(lineFill(lines, 2, 42500), 0.5); // last line: 5 s
+  const w = [{ start: 0, end: 1000, words: [{ start: 0, end: 500, text: 'a' }, { start: 500, end: 1000, text: 'b' }] }];
+  assert.equal(lineFill(w, 0, 250), 0.25);
+});
+
+test('store: holdView counts open views; reload refetches', async () => {
+  const got = [];
+  const L = await import('../js/lyrics.js');
+  L.useBackend({ invoke: (cmd, a) => { if (cmd === 'lyrics_get') got.push(a.id); return Promise.resolve({ id: a && a.id, status: 'none', kind: 'plain', lines: [], offset: 0 }); } });
+  L.onSong(null);
+  L.setActive(false);
+  const a = L.holdView(), b = L.holdView();
+  a(); a(); // releasing twice counts once
+  L.onSong('v1');
+  assert.deepEqual(got, ['v1']); // the second view is still open
+  await new Promise((r) => setTimeout(r, 2));
+  L.reload();
+  assert.deepEqual(got, ['v1', 'v1']);
+  await new Promise((r) => setTimeout(r, 2));
+  b();
+  L.onSong('v2');
+  assert.deepEqual(got, ['v1', 'v1']); // no view open: nothing fetched
+  L.onSong(null);
+});
+
+test('store: a failed settings save restores the switch and rejects', async () => {
+  const L = await import('../js/lyrics.js');
+  L.useBackend({ invoke: (cmd) => (cmd === 'lyrics_set_settings' ? Promise.reject('x') : Promise.resolve(null)) });
+  L.ly.netease = true; L.ly.trans = true;
+  await assert.rejects(L.setNetease(false));
+  assert.equal(L.ly.netease, true);
+  await assert.rejects(L.setTrans(false));
+  assert.equal(L.ly.trans, true);
 });

@@ -11,6 +11,7 @@ import { pickerOpen } from './savepicker.js';
 import { sourceLabel } from './player.js';
 import { errKey } from './playlists.js';
 import { toast } from './settings.js';
+import { closeLyrics } from './lyricspanel.js';
 
 const $ = (id) => document.getElementById(id);
 /** Row height of the panel's lists (matches `.q-row` in app.css). */
@@ -118,6 +119,7 @@ function clearUp() {
 
 export function openQueue() {
   if (isOpen) return;
+  closeLyrics();
   isOpen = true;
   $('queue').hidden = false;
   $('queuebtn').setAttribute('aria-pressed', 'true');

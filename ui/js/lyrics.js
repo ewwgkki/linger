@@ -17,6 +17,10 @@ const run = latest();
 const clk = clock();
 const perf = () => (globalThis.performance ? performance.now() : Date.now());
 let active = false;
+/** open lyrics views (holdView) */
+let views = 0;
+let playing = false;
+const clockSubs = new Set();
 let retryTimer = 0;
 let retried = false;
 /** song id whose data was requested (so setActive does not refetch) */
@@ -75,6 +79,7 @@ export function onSong(id) {
   ly.data = null;
   ly.loading = false;
   run(async () => null); // invalidate any request still in flight
+  playing = false;
   clk.seek(0, false, perf());
   confirmed = 0; confirmedSeq = offSeq = 0;
   emit();
@@ -87,14 +92,49 @@ export function setActive(on) {
   if (active && ly.id && requested !== ly.id) load(ly.id);
 }
 
+/**
+ * A lyrics view opened (main panel, full screen). Returns its release function; lyrics are fetched
+ * while at least one view holds on.
+ */
+export function holdView() {
+  let held = true;
+  views++;
+  setActive(true);
+  return () => {
+    if (!held) return;
+    held = false;
+    if (--views === 0) setActive(false);
+  };
+}
+
+/** Fetches the current song's lyrics again (the "retry" button). */
+export function reload() {
+  clearTimeout(retryTimer);
+  if (ly.id) return load(ly.id);
+}
+
+/** Calls `fn()` whenever the clock is set (position report, seek, play/pause); returns an unsubscribe function. */
+export function onClock(fn) {
+  clockSubs.add(fn);
+  return () => clockSubs.delete(fn);
+}
+const tick = () => { for (const fn of [...clockSubs]) { try { fn(); } catch (e) { console.error('lyrics clock', e); } } };
+
+/** Whether the clock is running (the song is playing). */
+export const isPlaying = () => playing;
+
 /** Player position in seconds (as the player reports it) and whether it is playing. */
-export function onPos(pos, playing) {
-  clk.set(pos * 1000, !!playing, perf());
+export function onPos(pos, isOn) {
+  playing = !!isOn;
+  clk.set(pos * 1000, playing, perf());
+  tick();
 }
 
 /** The user jumped (seek): snap the clock even if the jump is a few ms backwards. */
-export function seekTo(pos, playing) {
-  clk.seek(pos * 1000, !!playing, perf());
+export function seekTo(pos, isOn) {
+  playing = !!isOn;
+  clk.seek(pos * 1000, playing, perf());
+  tick();
 }
 
 /** Playback position in ms including the song's lyric offset (positive offset = lyrics earlier). */
@@ -153,17 +193,25 @@ export async function useFile(path) {
 
 const saveSettings = () => be.invoke('lyrics_set_settings', { netease: ly.netease, trans: ly.trans });
 
-export async function setTrans(on) {
-  ly.trans = !!on;
+/** Changes one saved switch; on failure restores it and rejects. */
+async function saveSwitch(key, on) {
+  const before = ly[key];
+  ly[key] = !!on;
   emit();
-  await saveSettings();
+  try {
+    await saveSettings();
+  } catch (e) {
+    ly[key] = before;
+    emit();
+    throw e;
+  }
 }
+
+export const setTrans = (on) => saveSwitch('trans', on);
 
 /** Switching the online source on/off refetches the current song when a view is open. */
 export async function setNetease(on) {
-  ly.netease = !!on;
-  emit();
-  await saveSettings();
+  await saveSwitch('netease', on);
   requested = null;
   if (active && ly.id) load(ly.id);
 }

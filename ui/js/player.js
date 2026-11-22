@@ -146,6 +146,15 @@ export function playList(list, start, shuffle) {
   call('player_play_list', { ids: list.map((s) => s.id), start: Math.max(0, Math.min(list.length - 1, start)), shuffle: !!shuffle });
 }
 
+/** Jumps to `secs` (slider, lyric line): the UI and the lyric clock follow at once. */
+export function seekPlayer(secs) {
+  if (ps.dur) secs = Math.min(secs, ps.dur);
+  holdPosUntil = performance.now() + 600;
+  showPos(secs);
+  seekTo(secs, ps.playing);
+  if (ps.dur) call('player_seek', { secs });
+}
+
 export const toggle = () => { if (ps.id) call('player_toggle'); };
 
 /**
@@ -218,11 +227,7 @@ export function initPlayer(c) {
     },
     end(v) {
       if (v == null) { showPos(ps.pos); return; } // dragged back to where it started
-      const secs = (v / 1000) * (ps.dur || 0);
-      holdPosUntil = performance.now() + 600;
-      showPos(secs);
-      seekTo(secs, ps.playing);
-      if (ps.dur) call('player_seek', { secs });
+      seekPlayer((v / 1000) * (ps.dur || 0));
     },
   });
 

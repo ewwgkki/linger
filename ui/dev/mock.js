@@ -1,11 +1,12 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
 // URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
-// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag|import|report (screenshots only:
+// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag|import|report|ly-word|ly-line|ly-plain|ly-none|ly-retry (screenshots only:
 // selects rows 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
 // menu1: plays the first playable row and opens the menu for row 4 alone; queue: plays the list, queues three
 // songs and opens the queue panel; qmenu: also right-clicks a queued row; drag: starts dragging row 1 by its
 // grip down to row 4 on a playlist page; import: opens settings at the import section; report: runs the mock import
-// through the settings button flow and shows the report dialog).
+// through the settings button flow and shows the report dialog; ly-<kind>: plays a song with that kind of lyrics
+// and opens the lyrics panel, with &pos=<secs>, &paused=1, &lylong=1 for a 1000-line song).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -39,6 +40,13 @@ function lyWord(offset, trans) {
     const words = parts.map((w, k) => ({ start: Math.round(start + k * dur), end: Math.round(start + (k + 1) * dur), text: k < parts.length - 1 ? w + ' ' : w }));
     return { start, end: start + 5200, text: en, words, trans: trans ? zhText : null };
   });
+  if (new URLSearchParams(location.search).has('lylong')) {
+    const long = Array.from({ length: 1000 }, (_, n) => {
+      const l = lines[n % lines.length], shift = (n - (n % lines.length)) * 6000;
+      return { ...l, start: l.start + shift, end: l.end + shift, words: l.words.map((w) => ({ ...w, start: w.start + shift, end: w.end + shift })) };
+    });
+    return { status: 'ok', kind: 'word', source: 'netease', lines: long, offset };
+  }
   return { status: 'ok', kind: 'word', source: 'netease', lines, offset };
 }
 function lyLine(offset) {
@@ -372,6 +380,17 @@ export function createMock() {
 function shot(what, commands) {
   const rows = () => [...document.querySelectorAll('#songlist .song')];
   const click = (el, o) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...o }));
+  if (what.startsWith('ly-')) {
+    const qs = new URLSearchParams(location.search), kind = what.slice(3);
+    const songs = commands.get_library().songs;
+    const i = songs.findIndex((s, k) => s.av && LY_KINDS[k % LY_KINDS.length] === kind);
+    if (i < 0) return;
+    commands.player_play_list({ ids: [songs[i].id, songs[(i + 1) % songs.length].id], start: 0 });
+    if (qs.has('pos')) commands.player_seek({ secs: +qs.get('pos') });
+    if (qs.get('paused') === '1') commands.player_toggle();
+    setTimeout(() => document.getElementById('lyricsbtn').click(), 150);
+    return;
+  }
   if (what === 'import' || what === 'report') {
     window.addEventListener('resize', (e) => e.stopImmediatePropagation(), true);
     const link = document.querySelector('#plnav [data-import]');

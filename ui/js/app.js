@@ -16,6 +16,7 @@ import { openSongMenu, openFolderMenu, closeMenus, menuOpen, playIds, queueIds, 
 import { saveSongs, pickerOpen } from './savepicker.js';
 import { initQueue } from './queue.js';
 import { initLyrics } from './lyrics.js';
+import { initLyricsPanel } from './lyricspanel.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -482,6 +483,7 @@ async function boot() {
   }
   initQueue(ctx);
   initLyrics(ctx);
+  initLyricsPanel(ctx);
   await initPlayer(ctx);
   // first start: nothing to show until a folder is added
   if (!ctx.lib.roots.length) ctx.openSettings();

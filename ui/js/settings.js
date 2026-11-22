@@ -4,6 +4,7 @@ import { api } from './api.js';
 import { rootLabel } from './views/songs.js';
 import { esc, icon, applyOnline } from './util.js';
 import { missingText, summaryKey } from './importview.js';
+import { ly, setNetease } from './lyrics.js';
 
 const $ = (id) => document.getElementById(id);
 /** With no scan event for this long, the scan thread is presumed dead and the UI is reset. */
@@ -43,6 +44,7 @@ export function openSettings() {
   renderRoots();
   scanInfo();
   ffmpegInfo();
+  $('lyneteasesw').checked = ly.netease;
 }
 
 /** Opens the settings dialog scrolled to the Spotify import section. */
@@ -324,6 +326,11 @@ export function initSettings(c, { loadLibrary }) {
   $('scanbtn').onclick = () => startScan(true);
   $('importbtn').onclick = runImport;
   $('importcopy').onclick = copyMissing;
+  $('lyneteasesw').onchange = (e) => setNetease(e.target.checked).catch((err) => {
+    console.error('lyrics_set_settings', err);
+    e.target.checked = ly.netease;
+    toast(t('lyrics.saveError'), { icon: 'x', autoHide: 6000 });
+  });
   $('importclose').onclick = () => $('importdlg').close();
   $('importx').onclick = () => $('importdlg').close();
   $('importlists').addEventListener('click', (e) => {
