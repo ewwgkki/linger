@@ -134,6 +134,22 @@ impl Player {
             inner: Mutex::new(Inner::new(queue, volume)),
         }
     }
+    /// Current song id and whether it is playing.
+    pub fn status(&self) -> (Option<String>, bool) {
+        let i = self.inner();
+        (i.id.clone(), i.playing)
+    }
+    /// Stops playback for app exit and gives the decoder a moment to end its FFmpeg child.
+    pub fn shutdown(&self) {
+        {
+            let mut i = self.inner();
+            i.gen += 1;
+            i.playing = false;
+            i.loaded = false;
+            self.retarget(&mut i, |e| e.stop());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
     /// The song the player is on (the id the UI sees).
     pub fn current_id(&self) -> Option<String> {
         self.inner().id.clone()
@@ -177,6 +193,7 @@ fn dto(i: &Inner) -> PlayerStateDto {
 
 fn emit_state(app: &AppHandle, i: &Inner) {
     let _ = app.emit("player://state", dto(i));
+    crate::tray::notify(app);
 }
 
 /// The queue view changed (no payload; the UI re-fetches `player_queue`).

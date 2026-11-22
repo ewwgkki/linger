@@ -130,6 +130,10 @@
   "skip.unreadable": "unreadable",
   "skip.dberror": "library database error",
 
+  "settings.window": "Window",
+  "settings.closeToTray": "Minimize to the system tray when I close the window",
+  "settings.closeToTrayHint": "Music keeps playing. Open or quit Linger from the tray icon at the bottom right of the taskbar.",
+  "settings.closeToTrayError": "Couldn't save this setting.",
   "settings.language": "Language",
   "settings.langError": "Couldn't switch the language",
   "settings.title": "Settings",

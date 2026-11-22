@@ -123,6 +123,10 @@
   "skip.unreadable": "无法读取",
   "skip.dberror": "写入曲库出错",
 
+  "settings.window": "窗口",
+  "settings.closeToTray": "关闭窗口时最小化到托盘",
+  "settings.closeToTrayHint": "音乐会继续播放。可以从任务栏右下角的托盘图标打开或退出 Linger。",
+  "settings.closeToTrayError": "这项设置保存失败。",
   "settings.language": "语言",
   "settings.langError": "无法切换语言",
   "settings.title": "设置",

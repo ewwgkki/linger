@@ -45,6 +45,8 @@ export function openSettings() {
   scanInfo();
   ffmpegInfo();
   $('lyneteasesw').checked = ly.netease;
+  api.invoke('window_settings').then((s) => { $('closetraysw').checked = s.close_to_tray; })
+    .catch((e) => console.error('window_settings', e));
 }
 
 /** Opens the settings dialog scrolled to the Spotify import section. */
@@ -362,6 +364,14 @@ export function initSettings(c, { loadLibrary }) {
     e.target.checked = ly.netease;
     toast(t('lyrics.saveError'), { icon: 'x', autoHide: 6000 });
   });
+  $('closetraysw').onchange = (e) => {
+    const on = e.target.checked;
+    api.invoke('window_set_close_to_tray', { enabled: on }).catch((err) => {
+      console.error('window_set_close_to_tray', err);
+      e.target.checked = !on;
+      toast(t('settings.closeToTrayError'), { icon: 'x', autoHide: 6000 });
+    });
+  };
   $('importclose').onclick = () => $('importdlg').close();
   $('importx').onclick = () => $('importdlg').close();
   $('importlists').addEventListener('click', (e) => {

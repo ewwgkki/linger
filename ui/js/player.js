@@ -286,6 +286,10 @@ export function initPlayer(c) {
     if (errId && errId !== ps.id) hideError();
   });
   api.listen('player://error', ({ id, reason }) => showError(id, reason));
+  // back from the tray: catch up, then let the lyrics and disc views resync
+  api.listen('app://shown', () => api.invoke('player_state').then(applyState)
+    .then(() => document.dispatchEvent(new Event('visibilitychange')))
+    .catch((e) => console.error('player_state', e)));
   return api.invoke('player_state').then(applyState).catch((e) => console.error('player_state', e));
 }
 

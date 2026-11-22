@@ -318,6 +318,8 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    window_settings: () => ({ close_to_tray: globalThis.__closeToTray !== false }),
+    window_set_close_to_tray: ({ enabled }) => { globalThis.__closeToTray = !!enabled; },
     start_scan: ({ root = null } = {}) => {
       globalThis.__lastScanRoot = root;
       emit('library://roots', lib.roots.map((r) => ({ ...r })));

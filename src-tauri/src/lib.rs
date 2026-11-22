@@ -11,12 +11,16 @@ pub mod scan;
 pub mod state;
 pub mod tags;
 pub mod text;
+pub mod tray;
 
 use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()
+        // must be the first plugin: a second launch only wakes the running app
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(tray::on_window_event)
         .register_asynchronous_uri_scheme_protocol("cover", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let path = request.uri().path().to_string();
@@ -45,11 +49,16 @@ pub fn run() {
             // all roots start optimistic (online); probing + scanning run in the background
             app.manage(state::AppState::new(db, data_dir));
             commands::player::init(app.handle());
+            if let Err(e) = tray::init(app.handle()) {
+                eprintln!("linger: cannot create tray icon: {e}");
+            }
             commands::library::spawn_scan(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::set_app_title,
+            tray::window_settings,
+            tray::window_set_close_to_tray,
             commands::library::get_library,
             commands::library::add_roots,
             commands::library::remove_root,

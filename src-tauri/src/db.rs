@@ -249,6 +249,12 @@ impl Db {
         Ok(Db { conn })
     }
 
+    /// Moves finished WAL pages into the database without waiting for other users.
+    pub fn checkpoint(&self) -> Result<()> {
+        self.conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))?;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
