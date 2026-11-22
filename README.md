@@ -27,6 +27,7 @@ WMA, APE and Opus playback needs `ffmpeg.exe` in the same folder as `Linger.exe`
 - Import Spotify playlists from Exportify or Spotify data exports / 从 Exportify 或 Spotify 数据导出导入歌单
 - Synced karaoke-style lyrics and a full-screen play page / 卡拉 OK 式滚动歌词和全屏播放页
 - Lyrics from embedded tags, `.lrc` files, LRCLIB and NetEase / 歌词来自内嵌标签、`.lrc`、LRCLIB 和网易云
+- English and Simplified Chinese, switchable in Settings / 支持英文和简体中文，可在设置中切换
 - No ads, no accounts, and your music files are never modified / 无广告、无需账号、绝不修改音乐文件
 
 Online lyric lookups send only the song title, artist, album and duration. NetEase can be turned off in settings.
