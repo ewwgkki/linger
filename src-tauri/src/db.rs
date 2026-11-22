@@ -370,6 +370,19 @@ impl Db {
                     row.pinned as i64, row.fetched])?;
         Ok(())
     }
+    /// Resolver write: never replaces a pinned row, and a "none" never replaces an "ok" row.
+    /// Atomic in one statement. Returns whether the row was written.
+    pub fn put_fetched_lyric(&self, song_id: &str, row: &LyricRow) -> Result<bool> {
+        let n = self.conn.execute(
+            "INSERT INTO lyrics(song_id, status, source, ext_id, lrc, yrc, trans, plain, pinned, fetched)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,0,?9)
+             ON CONFLICT(song_id) DO UPDATE SET status=excluded.status, source=excluded.source,
+               ext_id=excluded.ext_id, lrc=excluded.lrc, yrc=excluded.yrc, trans=excluded.trans,
+               plain=excluded.plain, pinned=0, fetched=excluded.fetched
+             WHERE lyrics.pinned=0 AND (excluded.status='ok' OR lyrics.status<>'ok')",
+            params![song_id, row.status, row.source, row.ext_id, row.lrc, row.yrc, row.trans, row.plain, row.fetched])?;
+        Ok(n > 0)
+    }
     /// 0 when the song has no stored offset.
     pub fn lyric_offset(&self, song_id: &str) -> Result<i32> {
         Ok(self.conn.query_row("SELECT offset_ms FROM lyrics_offset WHERE song_id=?1", [song_id],

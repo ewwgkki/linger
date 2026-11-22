@@ -103,7 +103,7 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
                     continue;
                 }
                 let row = row_of(p.name(), raw, now);
-                let _ = lock(db).put_lyric(&song.id, &row);
+                let _ = lock(db).put_fetched_lyric(&song.id, &row);
                 return ok(parsed, p.name());
             }
             Ok(None) => {}
@@ -114,7 +114,7 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
         return status_only("retry");
     }
     let row = LyricRow { status: "none".into(), fetched: now, ..Default::default() };
-    let _ = lock(db).put_lyric(&song.id, &row);
+    let _ = lock(db).put_fetched_lyric(&song.id, &row);
     status_only("none")
 }
 
@@ -258,6 +258,57 @@ mod tests {
         let db = mem();
         assert_eq!(resolve(&db, &song(), None, &[], 1).status, "none");
         assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), None);
+    }
+    fn pin(db: &Mutex<Db>) {
+        let row = LyricRow { status: "ok".into(), source: Some("manual".into()), lrc: Some("[00:05.00]mine".into()),
+                             pinned: true, fetched: 1, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &row).unwrap();
+    }
+    fn ok_row(db: &Mutex<Db>) {
+        let row = LyricRow { status: "ok".into(), source: Some("netease".into()), lrc: Some(timed().into()), fetched: 1, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &row).unwrap();
+    }
+    #[test] fn pinned_survives_provider_hit_and_none() {
+        // empty-parsing pinned row falls through to providers but must not be replaced
+        let db = mem();
+        let row = LyricRow { status: "ok".into(), source: Some("manual".into()), lrc: Some("".into()), pinned: true, fetched: 1, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &row).unwrap();
+        resolve(&db, &song(), None, &[&Fake::new("lrclib", Ok(Some(timed())))], 5);
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), Some(row.clone()));
+        resolve(&db, &song(), None, &[&Fake::new("lrclib", Ok(None))], 5);
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), Some(row));
+    }
+    struct Racer<'a> { db: &'a Mutex<Db> }
+    impl Provider for Racer<'_> {
+        fn name(&self) -> &'static str { "lrclib" }
+        fn best(&self, _: &Query) -> Result<Option<Raw>, NetError> {
+            pin(self.db); // db lock must be free here
+            Ok(Some(Raw { ext_id: "7".into(), lrc: Some(timed().into()), ..Default::default() }))
+        }
+        fn search(&self, _: &Query) -> Result<Vec<Candidate>, NetError> { Ok(vec![]) }
+        fn fetch(&self, _: &str) -> Result<Option<Raw>, NetError> { Ok(None) }
+    }
+    #[test] fn pin_made_during_lookup_survives() {
+        let db = mem();
+        resolve(&db, &song(), None, &[&Racer { db: &db }], 5);
+        let row = db.lock().unwrap().lyric("s1").unwrap().unwrap();
+        assert!(row.pinned);
+        assert_eq!(row.lrc.as_deref(), Some("[00:05.00]mine"));
+    }
+    #[test] fn ok_row_survives_none_and_failure() {
+        let db = mem();
+        // an ok row whose text parses empty: providers all say none
+        let row = LyricRow { status: "ok".into(), source: Some("netease".into()), lrc: Some("".into()), fetched: 1, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &row).unwrap();
+        assert_eq!(resolve(&db, &song(), None, &[&Fake::new("lrclib", Ok(None))], 5).status, "none");
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), Some(row));
+        // a valid ok row survives a failed lookup (never reaches providers)
+        let db = mem();
+        ok_row(&db);
+        let bad = Fake::new("lrclib", Err(()));
+        assert_eq!(resolve(&db, &song(), None, &[&bad], 5).status, "ok");
+        assert_eq!(bad.n(), 0);
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap().unwrap().fetched, 1);
     }
     #[test] fn pinned_wins_over_embedded() {
         let d = tempfile::tempdir().unwrap();
