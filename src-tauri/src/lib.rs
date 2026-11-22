@@ -91,6 +91,7 @@ pub fn run() {
             commands::playlists::get_saved,
             commands::playlists::get_memberships,
             commands::playlists::save_songs,
+            commands::export::export_playlist,
             commands::import::import_spotify,
             commands::lyrics::lyrics_get,
             commands::lyrics::lyrics_search,

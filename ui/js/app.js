@@ -75,6 +75,25 @@ export const ctx = {
 document.addEventListener('error', (e) => { if (e.target.tagName === 'IMG' && e.target.closest('.art')) e.target.remove(); }, true);
 
 // ---------- language ----------
+let exporting = false;
+async function exportList(target) {
+  if (exporting) return;
+  exporting = true;
+  try {
+    const r = await api.invoke('export_playlist', { id: target === 'fav' ? null : +target, fallbackName: t('fav.title') });
+    if (!r) return;
+    const done = t('export.done', { n: r.exported, file: r.file });
+    const skipped = r.skipped ? ` ${t('export.skipped', { n: r.skipped })}` : '';
+    toast(`${done}${skipped} ${t('export.privacy')}`, { icon: 'check', autoHide: 9000 });
+  } catch (e) {
+    const key = String((e && e.message) || e);
+    toast(key.startsWith('export.') || key.startsWith('playlist.') ? t(key) : t('export.writeFailed'), { icon: 'x', autoHide: 7000 });
+    console.error('export_playlist', e);
+  } finally {
+    exporting = false;
+  }
+}
+
 function syncTitle() {
   document.title = lang() === 'zh-CN' ? 'Linger \u00b7 \u4f59\u97f3' : 'Linger';
   api.invoke('set_app_title', { lang: lang() }).catch((e) => console.error('set_app_title', e));
@@ -314,6 +333,8 @@ $('view').addEventListener('click', (e) => {
   if (tg.closest('[data-open-settings]')) { ctx.openSettings(); return; }
   const tgo = tg.closest('[data-tab-go]');
   if (tgo) { switchTab(tgo.dataset.tabGo); return; }
+  const ex = tg.closest('[data-pl-export]');
+  if (ex) { exportList(ex.dataset.plExport); return; }
   const rn = tg.closest('[data-pl-rename]');
   if (rn) { renameList(+rn.dataset.plRename); return; }
   const dl = tg.closest('[data-pl-delete]');

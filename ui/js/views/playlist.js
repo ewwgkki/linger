@@ -58,7 +58,9 @@ export function renderPlaylist(el, ctx) {
   const playableCount = list.filter((s) => playable(s, caps)).length;
   const lost = list.filter((s) => s.missing).length, blocked = list.length - playableCount - lost;
   const title = fav ? t('fav.title') : meta.name;
-  const edit = fav ? '' : `
+  const exportBtn = `
+      <button class="btn lg" type="button" data-pl-export="${fav ? 'fav' : id}" title="${esc(t('export.tip'))}" ${all.length ? '' : 'disabled'}>${icon('export')}${esc(t('export.button'))}</button>`;
+  const edit = fav ? exportBtn : `${exportBtn}
       <button class="btn lg" type="button" data-pl-rename="${id}">${icon('edit')}${esc(t('playlist.rename'))}</button>
       <button class="btn lg" type="button" data-pl-delete="${id}">${icon('trash')}${esc(t('playlist.delete'))}</button>`;
   const acts = `<div class="hero-acts">

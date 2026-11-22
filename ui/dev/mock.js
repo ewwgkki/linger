@@ -318,6 +318,11 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    export_playlist: ({ id }) => {
+      const items = id == null ? fav : findList(id).items;
+      globalThis.__lastExport = id;
+      return { file: 'demo.m3u8', exported: Math.max(0, items.length - 1), skipped: items.length ? 1 : 0 };
+    },
     window_settings: () => ({ close_to_tray: globalThis.__closeToTray !== false }),
     window_set_close_to_tray: ({ enabled }) => { globalThis.__closeToTray = !!enabled; },
     start_scan: ({ root = null } = {}) => {

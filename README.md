@@ -30,6 +30,7 @@ Run the installer and choose a folder. No administrator rights are needed, and W
 - MP3, FLAC, M4A, WAV, OGG, WMA, APE and Opus; CUE sheets are split into tracks / 支持常见格式，CUE 整轨自动分轨
 - Browse by song, artist, album, folder and quality / 按歌曲、歌手、专辑、文件夹和音质浏览
 - Playlists, favorites and a play queue / 歌单、我喜欢的音乐、播放队列
+- Export playlists and liked songs as M3U8 files / 将歌单和我喜欢的音乐导出为 M3U8 文件
 - Import Spotify playlists from Exportify or Spotify data exports / 从 Exportify 或 Spotify 数据导出导入歌单
 - Synced karaoke-style lyrics and a full-screen play page / 卡拉 OK 式滚动歌词和全屏播放页
 - Lyrics from embedded tags, `.lrc` files, LRCLIB and NetEase / 歌词来自内嵌标签、`.lrc`、LRCLIB 和网易云
