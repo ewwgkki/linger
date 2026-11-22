@@ -108,14 +108,19 @@ export function latest() {
 const DEFAULT_BACKDROP = [58, 60, 74];
 /** Brightest the backdrop's top colour may get; light ink stays well above 4.5:1 on it. */
 const BACKDROP_MAX_LUM = 0.075;
+const BACKDROP_INK = [251, 250, 247];
+/** Secondary text must clear 4.5:1 after rounding to whole colour values. */
+const TEXT_MIN_CONTRAST = 4.6;
 
 const channelLum = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
 const relLum = ([r, g, b]) => 0.2126 * channelLum(r) + 0.7152 * channelLum(g) + 0.0722 * channelLum(b);
+const ratio = (a, b) => { const [x, y] = [relLum(a), relLum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
 const hex = (rgb) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
 
 /**
  * Full-screen page colours from a cover colour: a darkened gradient that keeps the hue, with light
- * ink. Any input (also none) gives at least 4.5:1 for `ink` on both `top` and `bottom`.
+ * ink. `ink` is sung/current text, `mute` other lines and tools, `off` the unsung part of the current
+ * line. Any input (also none) gives each of them at least 4.5:1 on both `top` and `bottom`.
  */
 export function backdropColors(rgb) {
   const ok = Array.isArray(rgb) && rgb.length === 3 && rgb.every((v) => Number.isFinite(v));
@@ -128,5 +133,14 @@ export function backdropColors(rgb) {
     if (relLum(lifted.map((v) => v * k)) <= BACKDROP_MAX_LUM) lo = k; else hi = k;
   }
   const top = lifted.map((v) => v * lo);
-  return { top: hex(top), bottom: hex(top.map((v) => v * 0.42)), ink: '#fbfaf7' };
+  const bottom = top.map((v) => v * 0.42);
+  // the least ink (from `share` up) that stays readable on both ends of the gradient
+  const level = (share) => {
+    for (let k = share; k < 1; k += 0.01) {
+      const c = BACKDROP_INK.map((v, i) => Math.round(v * k + top[i] * (1 - k)));
+      if (ratio(c, top) >= TEXT_MIN_CONTRAST && ratio(c, bottom) >= TEXT_MIN_CONTRAST) return c;
+    }
+    return BACKDROP_INK;
+  };
+  return { top: hex(top), bottom: hex(bottom), ink: hex(BACKDROP_INK), mute: hex(level(0.74)), off: hex(level(0.6)) };
 }

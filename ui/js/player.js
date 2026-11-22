@@ -8,7 +8,7 @@ import { pl, isSaved, cachedItems, loadItems, FAV } from './playlists.js';
 import { saveSongs } from './savepicker.js';
 import { toggleQueue } from './queue.js';
 import { onSong, onPos, seekTo } from './lyrics.js';
-import { closeNowPlaying } from './nowplaying.js';
+import { closeNowPlaying, refreshNowPlaying } from './nowplaying.js';
 
 const $ = (id) => document.getElementById(id);
 const REPEAT_NEXT = { all: 'one', one: 'off', off: 'all' };
@@ -282,4 +282,5 @@ export function initPlayer(c) {
 /** Library reloaded: refresh the now-playing labels (titles, covers may have changed). */
 export function libraryChanged() {
   if (ps.id) renderNow();
+  refreshNowPlaying();
 }

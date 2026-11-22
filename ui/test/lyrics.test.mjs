@@ -203,10 +203,16 @@ const contrast = (a, b) => {
 test('backdrop keeps text readable', () => {
   const colors = [[255, 255, 255], [0, 0, 0], [128, 128, 128], [255, 0, 0], [255, 255, 0]];
   for (const c of colors) {
-    const { top, bottom, ink } = backdropColors(c);
-    for (const v of [top, bottom, ink]) assert.match(v, /^#[0-9a-f]{6}$/);
-    assert.ok(contrast(ink, top) >= 4.5, `${c} ink on top: ${contrast(ink, top)}`);
-    assert.ok(contrast(ink, bottom) >= 4.5, `${c} ink on bottom: ${contrast(ink, bottom)}`);
+    const b = backdropColors(c);
+    for (const name of ['ink', 'mute', 'off']) {
+      assert.match(String(b[name]), /^#[0-9a-f]{6}$/, `${c} ${name}`);
+      assert.ok(contrast(b[name], b.top) >= 4.5, `${c} ${name} on top: ${contrast(b[name], b.top)}`);
+      assert.ok(contrast(b[name], b.bottom) >= 4.5, `${c} ${name} on bottom: ${contrast(b[name], b.bottom)}`);
+    }
+    assert.match(b.top, /^#[0-9a-f]{6}$/);
+    assert.match(b.bottom, /^#[0-9a-f]{6}$/);
+    // the three text levels stay distinct: sung > other lines > unsung
+    assert.ok(lumOf(b.ink) > lumOf(b.mute) && lumOf(b.mute) >= lumOf(b.off), `${c} text levels`);
   }
 });
 

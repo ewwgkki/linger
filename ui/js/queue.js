@@ -12,6 +12,7 @@ import { sourceLabel } from './player.js';
 import { errKey } from './playlists.js';
 import { toast } from './settings.js';
 import { closeLyrics } from './lyricspanel.js';
+import { forgetDrawer } from './nowplaying.js';
 
 const $ = (id) => document.getElementById(id);
 /** Row height of the panel's lists (matches `.q-row` in app.css). */
@@ -120,6 +121,7 @@ function clearUp() {
 export function openQueue() {
   if (isOpen) return;
   closeLyrics();
+  forgetDrawer();
   isOpen = true;
   $('queue').hidden = false;
   $('queuebtn').setAttribute('aria-pressed', 'true');
@@ -130,6 +132,7 @@ export function openQueue() {
 
 export function closeQueue() {
   if (!isOpen) return;
+  forgetDrawer();
   isOpen = false;
   clearTimeout(timer);
   seq++;
