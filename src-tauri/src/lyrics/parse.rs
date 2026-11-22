@@ -99,7 +99,7 @@ struct Raw {
 }
 
 fn clamp(t: i64, offset: i64) -> u32 {
-    u32::try_from((t - offset).max(0)).unwrap_or(u32::MAX)
+    u32::try_from(t.saturating_sub(offset).max(0)).unwrap_or(u32::MAX)
 }
 
 /// Split a line body on `<time>` markers into words (None when no valid markers).
@@ -144,8 +144,8 @@ pub fn parse_lrc(text: &str) -> Parsed {
             let Some(end) = rest.find(']') else { break };
             let inner = &rest[1..end];
             if let Some(c) = time_re().captures(inner) {
-                any_stamp = true;
                 if let Some(t) = time_ms(&c) {
+                    any_stamp = true;
                     stamps.push(t);
                 }
             } else if tag_re().is_match(inner) {
@@ -180,7 +180,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
                 text: line_text.clone(),
                 words: words
                     .iter()
-                    .map(|w| RawWord { start: w.start + delta, end: w.end.map(|e| e + delta), text: w.text.clone() })
+                    .map(|w| RawWord { start: w.start.saturating_add(delta), end: w.end.map(|e| e.saturating_add(delta)), text: w.text.clone() })
                     .collect(),
             });
         }
@@ -207,7 +207,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
                 .into_iter()
                 .map(|w| {
                     let s = clamp(w.start, offset);
-                    let e = w.end.map(|e| clamp(e, offset)).or(end).unwrap_or(s).max(s);
+                    let e = w.end.map(|e| clamp(e, offset)).or(end).unwrap_or(s.saturating_add(1000)).max(s);
                     Word { start: s, end: e, text: w.text }
                 })
                 .collect();
@@ -334,6 +334,31 @@ mod tests {
     #[test]
     fn enhanced_last_word_uses_line_end() {
         let p = parse_lrc("[00:01.00]<00:01.00>你<00:01.50>好\n[00:03.00]下");
+        assert_eq!(p.lines[0].words[1].end, 3000);
+    }
+
+    #[test]
+    fn only_invalid_stamps_is_plain() {
+        let p = parse_lrc("[99999999999:00]text");
+        assert_eq!(pairs(&p), vec![(None, "text")]);
+        assert_eq!(p.kind(), "plain");
+    }
+
+    #[test]
+    fn extreme_offsets_do_not_panic() {
+        for o in ["-9223372036854775808", "+9223372036854775807"] {
+            let p = parse_lrc(&format!("[offset:{o}]\n[00:01.00]<00:01.00>你<00:02.00>好"));
+            assert_eq!(p.lines.len(), 1);
+            let l = &p.lines[0];
+            assert!(l.start.is_some());
+            assert!(l.words.iter().all(|w| w.end >= w.start));
+        }
+    }
+
+    #[test]
+    fn last_word_of_last_line_gets_one_second() {
+        let p = parse_lrc("[00:01.00]<00:01.00>你<00:02.00>好");
+        assert_eq!(p.lines[0].end, None);
         assert_eq!(p.lines[0].words[1].end, 3000);
     }
 
