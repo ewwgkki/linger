@@ -1,6 +1,7 @@
 // Settings dialog (music folders, scan, FFmpeg), scan progress and the toast.
 import { t, lang } from './i18n.js';
 import { api } from './api.js';
+import { rootLabel } from './views/songs.js';
 import { esc, icon, applyOnline } from './util.js';
 import { missingText, summaryKey } from './importview.js';
 
@@ -240,13 +241,13 @@ function progress(msg, pct) {
 }
 
 /** Asks the backend for a scan (a request during a running scan queues one more pass). */
-export function startScan(user = true) {
+export function startScan(user = true, root = null) {
   if (!ctx.lib.roots.length) { openSettings(); return; }
   const fresh = !scan.running;
   beginScan(user);
   if (fresh) progress(t('scan.finding'), 0);
   else if (user) scan.toast = true; // already running: the next progress event shows the toast
-  api.invoke('start_scan').catch((e) => {
+  api.invoke('start_scan', { root }).catch((e) => {
     endScan();
     const msg = t('scan.error', { msg: errText(e) });
     $('scanmsg').textContent = msg;
@@ -259,7 +260,7 @@ function onProgress({ done, total }) {
   progress(t('scan.progress', { done, total }), total ? (done / total) * 100 : 100);
 }
 
-async function onFinished({ count, skipped = [] }) {
+async function onFinished({ count, skipped = [], root = null }) {
   const wasUser = scan.user, shown = scan.toast, before = scan.before;
   endScan();
   try { await reload(); } catch (e) { console.error('get_library', e); }
@@ -274,7 +275,10 @@ async function onFinished({ count, skipped = [] }) {
       ? [added ? t('scan.added', { n: added }) : '', removed > 0 ? t('scan.removed', { n: removed }) : ''].filter(Boolean).join(t('list.sep'))
       : t('scan.noChange');
   }
-  const msg = change ? t('scan.done', { n: count, change }) : t('scan.doneCount', { n: count });
+  const folder = root != null ? ctx.lib.roots.find((r) => r.id === root) : null;
+  const msg = folder
+    ? t('scan.doneFolder', { name: rootLabel(folder), n: ctx.lib.songs.filter((s) => s.r === root).length, change: change || t('scan.noChange') })
+    : change ? t('scan.done', { n: count, change }) : t('scan.doneCount', { n: count });
   $('scanmsg').textContent = msg;
   $('scanprog').firstElementChild.style.width = '100%';
   if (skipped.length) {
@@ -304,6 +308,18 @@ export function initSettings(c, { loadLibrary }) {
   ctx = c;
   reload = loadLibrary;
   $('toastx').onclick = hideToast;
+  // A modal blocks the whole page: clicking the dimmed area outside it closes it.
+  const box = $('settings');
+  const outside = (e) => {
+    const r = box.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  let pressedOutside = false;
+  box.addEventListener('mousedown', (e) => { pressedOutside = e.button === 0 && outside(e); });
+  box.addEventListener('click', (e) => {
+    if (pressedOutside && outside(e)) box.close();
+    pressedOutside = false;
+  });
   $('addfolder').onclick = addFolders;
   $('scanbtn').onclick = () => startScan(true);
   $('importbtn').onclick = runImport;

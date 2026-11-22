@@ -3,6 +3,7 @@ import { t } from '../i18n.js';
 import { esc, mmss, hm, norm, fmtLabel, playable, coverUrl, icon } from '../util.js';
 import { selectSongs, info } from '../library.js';
 import { mountVList } from '../vlist.js';
+import { isScopedPage, pageQualityOptions } from '../filters.js';
 import { isSaved } from '../playlists.js';
 
 export const QUALITIES = [
@@ -47,17 +48,21 @@ export function fullPath(roots, s) {
   return base + s.p.split('/').join(sep);
 }
 
+/** The only removable filter: the search text. */
 export function chips(ctx) {
-  const { state, lib } = ctx;
-  const c = [];
-  if (state.q.trim()) c.push(`<button class="chip" data-clear="q">${esc(t('chip.search', { q: state.q.trim() }))}<span>&times;</span></button>`);
-  if (state.quality) c.push(`<button class="chip" data-clear="quality">${esc(qLabel(state.quality))}<span>&times;</span></button>`);
-  if (state.root != null) {
-    const r = lib.roots.find((x) => x.id === state.root);
-    c.push(`<button class="chip" data-clear="root">${esc(t('chip.folder', { name: rootLabel(r) }))}<span>&times;</span></button>`);
-  }
-  return c.length ? `<div class="chips">${c.join('')}</div>` : '';
+  const q = ctx.state.q.trim();
+  return q ? `<div class="chips"><button class="chip" data-clear="q">${esc(t('chip.search', { q }))}<span>&times;</span></button></div>` : '';
 }
+
+/** Quality filter inside a folder, artist, album or list. */
+export function pageQualityBar(list, active) {
+  const opts = pageQualityOptions(list, active);
+  if (!opts.length) return '';
+  return `<div class="seg pageq" role="group" aria-label="${esc(t('filter.quality'))}">${opts.map(({ k, n }) =>
+    `<button type="button" data-pageq="${k || ''}" aria-pressed="${(active || null) === k}">${esc(k ? qLabel(k) : t('filter.all'))} <small>${n}</small></button>`).join('')}</div>`;
+}
+
+export const toolbarLeft = (bar, chip) => (bar || chip ? `<div class="tool-l">${bar}${chip}</div>` : '<span></span>');
 
 export function emptyLibrary() {
   return `<div class="empty">${icon('disc')}<h2>${esc(t('empty.libTitle'))}</h2><p>${esc(t('empty.libText'))}</p>` +
@@ -140,14 +145,19 @@ export function renderSongs(el, ctx) {
     const albums = new Set(list.map((s) => s.b).filter(Boolean)).size;
     hero = `<section class="hero has-cv">${art(withCover(list), 'mic', 'lg round')}<div class="hero-txt"><span class="kicker">${esc(t('hero.artist'))}</span><h1>${esc(artistName(state.artist))}</h1>
       <div class="meta">${esc(t('meta.songs', { n: list.length }))}${albums ? ' · ' + esc(t('meta.albums', { n: albums })) : ''} · ${esc(hm(secs))}</div>${acts}</div></section>`;
+  } else if (state.root != null) {
+    const r = lib.roots.find((x) => x.id === state.root);
+    hero = `<section class="hero"><div class="hero-txt"><span class="kicker">${esc(t('hero.folder'))}</span><h1>${esc(rootLabel(r))}</h1>
+      <div class="meta">${songsMeta}</div>${acts}</div></section>`;
   } else {
-    const title = q ? t('hero.search') : state.quality ? qLabel(state.quality) : t('hero.allSongs');
+    const title = state.quality ? qLabel(state.quality) : q ? t('hero.search') : t('hero.allSongs');
     hero = `<section class="hero"><div class="hero-txt"><span class="kicker">${esc(t('hero.songs'))}</span><h1>${esc(title)}</h1>
       <div class="meta">${songsMeta}</div>${acts}</div></section>`;
   }
   const { col, dir } = state.sort;
   const sorts = state.album != null ? [['n', 'sort.track'], ...SORTS.filter((x) => x[0] !== 'b')] : SORTS;
-  hero += `<div class="toolbar">${chips(ctx) || '<span></span>'}<div class="sorts"><span>${esc(t('sort.label'))}</span><div class="seg" id="songsort">${
+  const bar = isScopedPage(state) ? pageQualityBar(selectSongs(lib.songs, { ...state, pageQ: null }), state.pageQ) : '';
+  hero += `<div class="toolbar">${toolbarLeft(bar, chips(ctx))}<div class="sorts"><span>${esc(t('sort.label'))}</span><div class="seg" id="songsort">${
     sorts.map(([c, k]) => `<button data-sort="${c}" aria-pressed="${col === c}" data-dir="${dir > 0 ? '↑' : '↓'}">${esc(t(k))}</button>`).join('')}</div></div></div>`;
   if (!list.length) {
     el.innerHTML = hero + `<div class="empty">${icon('search')}<p>${esc(t('empty.noMatch'))}<br>${esc(t('empty.noMatchHint'))}</p></div>`;

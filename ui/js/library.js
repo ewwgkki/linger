@@ -23,13 +23,14 @@ export function info(s) {
 
 function filterSongs(songs, state, withPeople) {
   const q = norm((state.q || '').trim());
+  const level = state.pageQ || state.quality;
   return songs.filter((s) => {
     const x = info(s);
     return (!q || x.key.includes(q)) &&
       (!withPeople || state.artist == null || s.a === state.artist) &&
       (!withPeople || state.album == null || s.b === state.album) &&
       (state.root == null || s.r === state.root) &&
-      (!state.quality || x.q === state.quality);
+      (!level || x.q === level);
   });
 }
 

@@ -138,7 +138,7 @@ export function playList(list, start, shuffle) {
   if (!list.length) return;
   const st = ctx.state;
   const h1 = document.querySelector('#view .hero h1');
-  source = { tab: st.tab, pl: st.pl, label: h1 ? h1.textContent.trim() : '', plSort: st.plSort && { ...st.plSort }, artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root };
+  source = { tab: st.tab, pl: st.pl, label: h1 ? h1.textContent.trim() : '', plSort: st.plSort && { ...st.plSort }, artist: st.artist, album: st.album, sort: { ...st.sort }, q: st.q, quality: st.quality, root: st.root, pageQ: st.pageQ };
   hideError();
   call('player_play_list', { ids: list.map((s) => s.id), start: Math.max(0, Math.min(list.length - 1, start)), shuffle: !!shuffle });
 }

@@ -7,11 +7,12 @@ import { renderSongs, QUALITIES, qLabel, rootLabel, fullPath, rowHeight } from '
 import { renderShelf } from './views/shelf.js';
 import { renderPlaylist, defaultPlSort } from './views/playlist.js';
 import { initPlayer, playList, markRows, libraryChanged, showSaved } from './player.js';
-import { initSettings, openSettings, openImport, toast } from './settings.js';
+import { initSettings, openSettings, openImport, startScan, toast } from './settings.js';
+import { enterPage } from './filters.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
-import { openSongMenu, closeMenus, menuOpen, playIds, queueIds, removeIds, savableIds } from './menu.js';
+import { openSongMenu, openFolderMenu, closeMenus, menuOpen, playIds, queueIds, removeIds, savableIds } from './menu.js';
 import { saveSongs, pickerOpen } from './savepicker.js';
 import { initQueue } from './queue.js';
 
@@ -22,7 +23,7 @@ const store = {
 };
 
 // tab: songs | artists | albums | fav | pl (with pl = playlist id); plSort is the sort on fav / pl pages.
-const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count', pl: null, plSort: null };
+const state = { tab: 'songs', q: '', artist: null, album: null, quality: null, root: null, pageQ: null, sort: { col: 'a', dir: 1 }, open: null, shelfSort: 'count', pl: null, plSort: null };
 const isPlTab = (tab) => tab === 'fav' || tab === 'pl';
 /** Shared with views and the player / settings modules. */
 export const ctx = {
@@ -54,14 +55,12 @@ export const ctx = {
   showSource(c) {
     if (isPlTab(c.tab)) {
       if (c.tab === 'pl' && !pl.list.some((p) => p.id === c.pl)) return;
-      try { history.pushState({ tab: c.tab, pl: c.pl }, '', plHash(c.tab, c.pl)); } catch (_) { /* ignore */ }
-      Object.assign(state, { tab: c.tab, pl: c.pl, artist: null, album: null, plSort: c.plSort ? { ...c.plSort } : defaultPlSort(c.tab), q: c.q, open: null });
-      $('q').value = c.q;
-      render();
-      return;
+      enter({ tab: c.tab, pl: c.pl, plSort: c.plSort ? { ...c.plSort } : defaultPlSort(c.tab), q: c.q, pageQ: c.pageQ ?? null });
+      pushNav(plHash(c.tab, c.pl));
+    } else {
+      enter({ tab: 'songs', pl: null, plSort: null, artist: c.artist, album: c.album, sort: { ...c.sort }, quality: c.quality, root: c.root, q: c.q, pageQ: c.pageQ ?? null });
+      pushNav('#songs');
     }
-    try { history.pushState({ artist: c.artist, album: c.album, sort: c.sort, tab: 'songs' }, '', location.pathname); } catch (_) { /* ignore */ }
-    Object.assign(state, { tab: 'songs', artist: c.artist, album: c.album, sort: { ...c.sort }, quality: c.quality, root: c.root, q: c.q, open: null });
     $('q').value = c.q;
     render();
   },
@@ -77,7 +76,7 @@ async function loadLibrary() {
   ctx.songsById = new Map(ctx.lib.songs.map((s) => [s.id, s]));
   ctx.caps = { ffmpeg: !!lib.ffmpeg };
   ctx.loaded = true;
-  if (state.root != null && !ctx.lib.roots.some((r) => r.id === state.root)) state.root = null;
+  if (state.root != null && !ctx.lib.roots.some((r) => r.id === state.root)) { state.root = null; state.pageQ = null; }
   sidebar();
   render();
   libraryChanged();
@@ -116,23 +115,41 @@ function sidebarPl() {
   syncSide();
 }
 
+const allSongsPage = () => state.tab === 'songs' && state.root == null && state.artist == null && state.album == null && !state.quality;
+
 function syncSide() {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute(b.closest('#mtabs') ? 'aria-pressed' : 'aria-selected', b.dataset.tab === state.tab));
   document.querySelectorAll('#qnav button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.q === state.quality));
-  document.querySelectorAll('#rootnav button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.root === (state.root == null ? '' : String(state.root))));
+  document.querySelectorAll('#rootnav button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.root === '' ? allSongsPage() : +b.dataset.root === state.root));
   document.querySelectorAll('#plnav [data-pl]').forEach((b) => {
     if (state.tab === 'pl' && +b.dataset.pl === state.pl) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   });
 }
 
+/** Clears every filter and the search box, then applies the page being entered. */
+function enter(patch) {
+  enterPage(state, patch);
+  $('q').value = '';
+}
+const navState = () => ({ tab: state.tab, pl: state.pl, artist: state.artist, album: state.album, sort: state.sort, root: state.root, quality: state.quality, pageQ: state.pageQ });
+function pushNav(url) {
+  try { history.pushState(navState(), '', url); } catch (_) { /* ignore */ }
+}
+/** A sidebar folder or quality: a songs page of its own. */
+function enterSongs(patch) {
+  enter({ tab: 'songs', pl: null, plSort: null, sort: { col: 'a', dir: 1 }, ...patch });
+  pushNav('#songs');
+  closeDrawer(); render(); window.scrollTo({ top: 0 });
+}
+
 $('qnav').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
-  state.quality = state.quality === b.dataset.q ? null : b.dataset.q; state.tab = 'songs'; state.open = null; closeDrawer(); render();
+  enterSongs({ quality: state.quality === b.dataset.q ? null : b.dataset.q });
 });
 $('rootnav').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
-  state.root = b.dataset.root === '' ? null : +b.dataset.root; state.open = null; closeDrawer(); render();
+  enterSongs({ root: b.dataset.root === '' ? null : +b.dataset.root });
 });
 $('plnav').addEventListener('click', (e) => {
   const b = e.target.closest('[data-pl]');
@@ -140,6 +157,22 @@ $('plnav').addEventListener('click', (e) => {
   if (e.target.closest('[data-import]')) { closeDrawer(); ctx.openImport(); }
 });
 $('newpl').onclick = () => newPlaylist();
+$('rootnav').addEventListener('contextmenu', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  e.preventDefault();
+  const r = b.getBoundingClientRect();
+  const x = e.clientX || r.left + 12, y = e.clientY || r.bottom;
+  openFolderMenu(x, y, b.dataset.root === '' ? null : +b.dataset.root, (root) => startScan(true, root));
+});
+// The webview's own menu and reload shortcuts would reload the whole interface and lose the page.
+document.addEventListener('contextmenu', (e) => {
+  if (!(e.target instanceof Element && e.target.closest('input:not([type=range]),textarea'))) e.preventDefault();
+});
+if (!isMock) {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) e.preventDefault();
+  });
+}
 function closeDrawer() { $('side').classList.remove('open'); $('scrim').classList.remove('open'); }
 $('menubtn').onclick = () => { $('side').classList.add('open'); $('scrim').classList.add('open'); };
 $('scrim').onclick = closeDrawer;
@@ -256,6 +289,13 @@ $('view').addEventListener('click', (e) => {
   if (tg.closest('#shuffleall')) { const l = playableList(); ctx.playList(l, Math.floor(Math.random() * l.length), true); return; }
   const ss = tg.closest('#shelfsort [data-v]');
   if (ss) { state.shelfSort = ss.dataset.v; store.set('shelfSort', state.shelfSort); render(); return; }
+  const pq = tg.closest('[data-pageq]');
+  if (pq) {
+    state.pageQ = pq.dataset.pageq || null; state.open = null;
+    try { history.replaceState(navState(), ''); } catch (_) { /* ignore */ }
+    render();
+    return;
+  }
   const cl = tg.closest('[data-clear]');
   if (cl) { const k = cl.dataset.clear; if (k === 'q') resetSearch(); else state[k] = null; state.open = null; render(); return; }
   const pb = tg.closest('[data-play]');
@@ -296,20 +336,21 @@ function copyPath(btn) {
 
 /** Enters an artist / album page; "back" is history navigation. */
 function go(o) {
-  try { history.pushState({ ...o, tab: 'songs' }, ''); } catch (_) { /* ignore */ }
   apply(o);
+  pushNav();
 }
 function apply(o) {
-  state.artist = o.artist ?? null; state.album = o.album ?? null;
+  const tab = o.tab || 'songs';
+  enter({
+    tab, artist: o.artist ?? null, album: o.album ?? null, root: o.root ?? null, quality: o.quality ?? null, pageQ: o.pageQ ?? null,
+    pl: tab === 'pl' ? o.pl ?? null : null, plSort: isPlTab(tab) ? defaultPlSort(tab) : null,
+  });
   if (o.sort) state.sort = o.sort;
-  resetSearch(); state.tab = o.tab || 'songs'; state.open = null;
-  state.pl = state.tab === 'pl' ? o.pl ?? null : null;
-  state.plSort = isPlTab(state.tab) ? defaultPlSort(state.tab) : null;
   render(); window.scrollTo({ top: 0 });
 }
 window.addEventListener('popstate', (e) => {
   const s = e.state || {}, h = fromHash();
-  apply({ artist: s.artist, album: s.album, tab: s.tab || h.tab, pl: s.tab ? s.pl : h.pl, sort: s.sort || { col: 'a', dir: 1 } });
+  apply({ artist: s.artist, album: s.album, root: s.root, quality: s.quality, pageQ: s.pageQ, tab: s.tab || h.tab, pl: s.tab ? s.pl : h.pl, sort: s.sort || { col: 'a', dir: 1 } });
 });
 $('view').addEventListener('dblclick', (e) => {
   const row = e.target.closest('.song'); if (!row || e.target.closest('button,a')) return;
@@ -327,15 +368,14 @@ $('view').addEventListener('keydown', (e) => {
 });
 /** `replace`: replace the history entry (leaving a page that no longer exists). */
 function switchTab(tab, replace = false) {
-  state.tab = tab; state.artist = null; state.album = null; state.open = null; state.pl = null;
-  state.plSort = isPlTab(tab) ? defaultPlSort(tab) : null;
+  enter({ tab, pl: null, plSort: isPlTab(tab) ? defaultPlSort(tab) : null });
   if (tab === 'songs') state.sort = { col: 'a', dir: 1 };
   try { history[replace ? 'replaceState' : 'pushState']({ tab }, '', '#' + tab); } catch (_) { /* ignore */ }
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
 const plHash = (tab, id) => (tab === 'pl' ? '#pl/' + id : '#' + tab);
 function openPlaylist(id) {
-  Object.assign(state, { tab: 'pl', pl: id, artist: null, album: null, open: null, plSort: defaultPlSort('pl') });
+  enter({ tab: 'pl', pl: id, plSort: defaultPlSort('pl') });
   try { history.pushState({ tab: 'pl', pl: id }, '', plHash('pl', id)); } catch (_) { /* ignore */ }
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }

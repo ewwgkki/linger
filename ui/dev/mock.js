@@ -227,16 +227,17 @@ export function createMock() {
       lib.roots = lib.roots.filter((r) => r.id !== id);
       return lib.roots.map((r) => ({ ...r }));
     },
-    start_scan: () => {
+    start_scan: ({ root = null } = {}) => {
+      globalThis.__lastScanRoot = root;
       emit('library://roots', lib.roots.map((r) => ({ ...r })));
-      const total = lib.songs.length;
+      const total = root == null ? lib.songs.length : lib.songs.filter((s) => s.r === root).length;
       let done = 0;
       const step = setInterval(() => {
         done = Math.min(total, done + Math.max(1, Math.ceil(total / 20)));
         emit('scan://progress', { done, total });
         if (done >= total) {
           clearInterval(step);
-          emit('scan://finished', { count: total, skipped: [{ path: 'D:\\Music\\notes\\readme.mp3', why: 'skip.notaudio' }, { path: 'D:\\Music\\broken.flac', why: 'skip.unreadable' }] });
+          emit('scan://finished', { count: lib.songs.length, root, skipped: [{ path: 'D:\\Music\\notes\\readme.mp3', why: 'skip.notaudio' }, { path: 'D:\\Music\\broken.flac', why: 'skip.unreadable' }] });
         }
       }, 100);
     },

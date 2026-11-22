@@ -5,7 +5,8 @@ import { api } from '../api.js';
 import { mountVList } from '../vlist.js';
 import { attachReorder } from '../reorder.js';
 import { pl, FAV, cachedItems, loadItems, itemsToRows, selectRows, errKey, moveCached, refetchItems } from '../playlists.js';
-import { art, withCover, rowHtml, rowHeight, SORTS, DETAIL_H } from './songs.js';
+import { art, withCover, rowHtml, rowHeight, SORTS, DETAIL_H, chips, pageQualityBar, toolbarLeft } from './songs.js';
+import { byPageQuality } from '../filters.js';
 import { toast } from '../settings.js';
 
 /** Rows per item list, rebuilt when the list or the library changes. */
@@ -51,7 +52,8 @@ export function renderPlaylist(el, ctx) {
 
   const q = norm(state.q.trim());
   const all = rowsFor(items, ctx.songsById);
-  const list = selectRows(all, state.q, state.plSort || defaultPlSort(state.tab));
+  const matched = selectRows(all, state.q, state.plSort || defaultPlSort(state.tab));
+  const list = byPageQuality(matched, state.pageQ);
   const secs = list.reduce((a, s) => a + (s.s || 0), 0);
   const playableCount = list.filter((s) => playable(s, caps)).length;
   const lost = list.filter((s) => s.missing).length, blocked = list.length - playableCount - lost;
@@ -75,15 +77,14 @@ export function renderPlaylist(el, ctx) {
   }
   const { col, dir } = state.plSort || defaultPlSort(state.tab);
   const sorts = [fav ? ['ad', 'sort.added'] : ['pos', 'sort.custom'], ...SORTS];
-  const chip = q ? `<div class="chips"><button class="chip" data-clear="q">${esc(t('chip.search', { q: state.q.trim() }))}<span>&times;</span></button></div>` : '<span></span>';
-  html += `<div class="toolbar">${chip}<div class="sorts"><span>${esc(t('sort.label'))}</span><div class="seg" id="plsort">${
+  html += `<div class="toolbar">${toolbarLeft(pageQualityBar(matched, state.pageQ), chips(ctx))}<div class="sorts"><span>${esc(t('sort.label'))}</span><div class="seg" id="plsort">${
     sorts.map(([c, k]) => `<button data-psort="${c}" aria-pressed="${col === c}" data-dir="${dir > 0 ? '↑' : '↓'}">${esc(t(k))}</button>`).join('')}</div></div></div>`;
   if (!list.length) {
     el.innerHTML = html + emptyBox('search', '', t('empty.noMatch'));
     return none(list);
   }
-  // drag to reorder: playlists in custom order (either direction) without a search
-  const grip = !fav && col === 'pos' && !q && list.length > 1;
+  // drag to reorder: playlists in custom order (either direction), unfiltered
+  const grip = !fav && col === 'pos' && !q && !state.pageQ && list.length > 1;
   el.innerHTML = html + `<div class="songs${grip ? ' reorderable' : ''}" id="songlist"></div>`;
   const expanded = () => {
     const i = state.open ? list.findIndex((s) => s.id === state.open && !s.missing) : -1;

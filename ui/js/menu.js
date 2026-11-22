@@ -166,6 +166,12 @@ export function openQueueMenu(x, y, id, ctx, { onJump, onRemove } = {}) {
 }
 
 /** Renders `items` ([act, icon, label key, disabled] or ['-']) at (x, y); `run(act, menuRect)` after closing. */
+/** Right-click menu of a folder in the sidebar (`root` null = all folders). */
+export function openFolderMenu(x, y, root, run) {
+  closeMenus();
+  showMenu(x, y, [['rescan', 'refresh', root == null ? 'menu.refreshAll' : 'menu.refreshFolder']], () => run(root));
+}
+
 function showMenu(x, y, items, run) {
   const el = $('menu');
   el.innerHTML = items.map(([k, ic, label, off]) => (k === '-' ? '<div class="m-sep" role="separator"></div>'

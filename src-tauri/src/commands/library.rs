@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -122,8 +122,11 @@ pub fn library_dto(db: &Db, online: &HashSet<i64>, ffmpeg: bool) -> crate::db::R
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanFinished {
+    /// songs in the whole library
     pub count: usize,
     pub skipped: Vec<Skipped>,
+    /// the folder this pass covered (`None` = all folders)
+    pub root: Option<i64>,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -164,10 +167,11 @@ pub fn remove_root(id: i64, state: State<'_, AppState>) -> Result<Vec<RootDto>, 
     Ok(dto)
 }
 
-/// Starts a background probe + incremental scan; during a running scan, queues one more pass.
+/// Starts a background probe + incremental scan of one folder (`root`) or of all folders;
+/// during a running scan, queues one more pass.
 #[tauri::command]
-pub fn start_scan(app: AppHandle) {
-    spawn_scan(app);
+pub fn start_scan(root: Option<i64>, app: AppHandle) {
+    spawn_scan_for(app, root);
 }
 
 /// Probes every root in parallel (each capped at 3 s).
@@ -183,39 +187,65 @@ pub fn probe_roots(roots: &[Root]) -> HashSet<i64> {
 }
 
 /// One scan thread at a time. A request made while a scan runs queues exactly one more pass,
-/// so a folder added mid-scan (or during the startup probe) is still scanned.
+/// so a folder added mid-scan (or during the startup probe) is still scanned. A pass covers one
+/// folder or all of them (`None`); queued requests for different folders widen to all.
 #[derive(Debug, Default)]
-pub struct ScanGate {
-    running: AtomicBool,
-    again: AtomicBool,
+pub struct ScanGate(Mutex<GateState>);
+
+#[derive(Debug, Default)]
+struct GateState {
+    running: bool,
+    scope: Option<i64>,
+    /// the queued pass, if any, and its scope
+    pending: Option<Option<i64>>,
 }
 
 impl ScanGate {
-    /// Returns true when the caller must start a scan thread.
+    fn lock(&self) -> MutexGuard<'_, GateState> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    /// Requests a scan of all folders; true when the caller must start a scan thread.
     pub fn request(&self) -> bool {
-        if self.running.swap(true, Ordering::SeqCst) {
-            self.again.store(true, Ordering::SeqCst);
+        self.request_for(None)
+    }
+    /// Requests a scan of one folder (`None` = all); true when the caller must start a thread.
+    pub fn request_for(&self, root: Option<i64>) -> bool {
+        let mut g = self.lock();
+        if g.running {
+            g.pending = Some(match g.pending {
+                None => root,
+                Some(p) if p == root => p,
+                Some(_) => None,
+            });
             false
         } else {
+            g.running = true;
+            g.scope = root;
             true
         }
     }
+    /// The folder the current pass covers (`None` = all).
+    pub fn scope(&self) -> Option<i64> {
+        self.lock().scope
+    }
     /// Called by the scan thread after each pass; true means run another pass.
     pub fn finish(&self) -> bool {
-        if self.again.swap(false, Ordering::SeqCst) {
-            return true;
+        let mut g = self.lock();
+        if let Some(next) = g.pending.take() {
+            g.scope = next;
+            true
+        } else {
+            g.running = false;
+            g.scope = None;
+            false
         }
-        self.running.store(false, Ordering::SeqCst);
-        // a request that arrived between the check and the store
-        self.again.swap(false, Ordering::SeqCst) && !self.running.swap(true, Ordering::SeqCst)
     }
     /// The scan thread could not start or panicked.
     pub fn abort(&self) {
-        self.again.store(false, Ordering::SeqCst);
-        self.running.store(false, Ordering::SeqCst);
+        *self.lock() = GateState::default();
     }
     pub fn running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        self.lock().running
     }
 }
 
@@ -240,8 +270,20 @@ impl Drop for BulkGuard<'_> {
 fn scan_pass(app: &AppHandle, state: &AppState) {
     let _ = state.db().set_bulk(true);
     let _bulk = BulkGuard(state);
-    let roots = state.db().roots().unwrap_or_default();
-    let online = probe_roots(&roots);
+    let only = state.scan.scope();
+    let mut roots = state.db().roots().unwrap_or_default();
+    roots.retain(|r| only.map_or(true, |id| id == r.id));
+    let probed = probe_roots(&roots);
+    // a single-folder pass leaves the other folders' online state as it was
+    let online = match only {
+        None => probed,
+        Some(id) => {
+            let mut all = state.online();
+            all.remove(&id);
+            all.extend(probed);
+            all
+        }
+    };
     state.set_online(online.clone());
     if let Ok(dto) = roots_dto(&state.db(), &online) {
         let _ = app.emit("library://roots", dto);
@@ -256,11 +298,15 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
     if state.db().relink_missing().unwrap_or(0) > 0 {
         let _ = app.emit("playlists://changed", super::playlists::PlaylistsChanged { id: None, favorites: true });
     }
-    let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped });
+    let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped, root: only });
 }
 
 pub fn spawn_scan(app: AppHandle) {
-    if !app.state::<AppState>().scan.request() {
+    spawn_scan_for(app, None);
+}
+
+fn spawn_scan_for(app: AppHandle, root: Option<i64>) {
+    if !app.state::<AppState>().scan.request_for(root) {
         return;
     }
     let app2 = app.clone();
@@ -300,6 +346,27 @@ mod tests {
         g.abort();
         assert!(!g.running());
         assert!(g.request());
+    }
+
+    #[test]
+    fn scan_gate_tracks_folder_scope() {
+        let g = ScanGate::default();
+        assert!(g.request_for(Some(7)), "idle: starts a pass for folder 7");
+        assert_eq!(g.scope(), Some(7));
+        assert!(!g.request_for(Some(7)));
+        assert!(g.finish(), "same folder queued");
+        assert_eq!(g.scope(), Some(7));
+        assert!(!g.request_for(Some(8)));
+        assert!(!g.request_for(Some(9)), "two different folders widen to a full pass");
+        assert!(g.finish());
+        assert_eq!(g.scope(), None);
+        assert!(!g.finish());
+        assert!(g.request_for(Some(3)));
+        assert!(!g.request(), "a full request during a folder pass stays full");
+        assert!(g.finish());
+        assert_eq!(g.scope(), None);
+        assert!(!g.finish());
+        assert!(!g.running());
     }
 
     #[test]
