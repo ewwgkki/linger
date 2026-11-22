@@ -25,6 +25,81 @@ function hash(s) {
   return h >>> 0;
 }
 
+// ---- lyrics (Task 5 commands): generic invented text only ----
+const LY_TEXT = [
+  ['Morning light on the water', '清晨的光落在水面'], ['We walk where the road runs thin', '我们走在窄窄的路上'],
+  ['Counting the lamps as they fade', '数着渐渐熄灭的灯'], ['Carry the quiet with you', '带上这片安静'],
+  ['Every window holds a song', '每扇窗里都有一首歌'], ['Slow rivers bring us home', '缓缓的河流带我们回家'],
+  ['Hold the last note a while', '把最后一个音留一会儿'], ['Tomorrow answers back', '明天会有回答'],
+];
+function lyWord(offset, trans) {
+  const lines = LY_TEXT.map(([en, zhText], i) => {
+    const start = 8000 + i * 6000, parts = en.split(' ');
+    const dur = 5200 / parts.length;
+    const words = parts.map((w, k) => ({ start: Math.round(start + k * dur), end: Math.round(start + (k + 1) * dur), text: k < parts.length - 1 ? w + ' ' : w }));
+    return { start, end: start + 5200, text: en, words, trans: trans ? zhText : null };
+  });
+  return { status: 'ok', kind: 'word', source: 'netease', lines, offset };
+}
+function lyLine(offset) {
+  const lines = LY_TEXT.map(([en], i) => ({ start: 6000 + i * 7000, end: null, text: en, words: [], trans: null }));
+  return { status: 'ok', kind: 'line', source: 'file', lines, offset };
+}
+function lyPlain(offset) {
+  return { status: 'ok', kind: 'plain', source: 'embedded', lines: LY_TEXT.map(([en]) => ({ start: null, end: null, text: en, words: [], trans: null })), offset };
+}
+const LY_KINDS = ['word', 'line', 'plain', 'none', 'retry', 'word'];
+
+function lyricsCommands(lib) {
+  const index = new Map(lib.songs.map((x, i) => [x.id, i]));
+  const offsets = new Map(), chosen = new Map(), retried = new Set();
+  let settings = { netease: true, trans: true };
+  const kindOf = (id) => LY_KINDS[(index.get(id) ?? 3) % LY_KINDS.length];
+  const get = (id) => {
+    const off = offsets.get(id) || 0;
+    if (chosen.has(id)) return { id, ...chosen.get(id), offset: off };
+    const k = kindOf(id);
+    if (k === 'word') return { id, ...lyWord(off, settings.netease) };
+    if (k === 'line') return { id, ...lyLine(off) };
+    if (k === 'plain') return { id, ...lyPlain(off) };
+    if (k === 'retry' && !retried.has(id)) { retried.add(id); return { id, status: 'retry', kind: 'plain', source: '', lines: [], offset: off }; }
+    if (k === 'retry') return { id, ...lyLine(off) };
+    return { id, status: 'none', kind: 'plain', source: '', lines: [], offset: off };
+  };
+  return {
+    lyrics_get: ({ id }) => get(id),
+    lyrics_search: ({ id, title, artist }) => {
+      if (title === 'offline') throw 'lyrics.netError';
+      const s = lib.songs[index.get(id) ?? 0] || {};
+      const t = title || s.t || 'Untitled', a = artist || s.a || 'Unknown';
+      return [
+        { source: 'netease', ext_id: '1001', title: t, artist: a, album: s.b || '', dur: s.s || 200, synced: true },
+        { source: 'netease', ext_id: '1002', title: t + ' (Live)', artist: a, album: 'Live', dur: (s.s || 200) + 12, synced: true },
+        { source: 'lrclib', ext_id: '2001', title: t, artist: a, album: s.b || '', dur: s.s || 200, synced: false },
+      ];
+    },
+    lyrics_choose: ({ id, source, extId }) => {
+      chosen.set(id, extId === '2001' ? lyPlain(0) : lyWord(0, true));
+      chosen.get(id).source = source;
+      return get(id);
+    },
+    lyrics_use_file: ({ id, path }) => {
+      if (!/\.(lrc|txt|ttml|qrc|yrc)$/i.test(String(path))) throw 'lyrics.badFile';
+      chosen.set(id, lyLine(0));
+      return get(id);
+    },
+    lyrics_set_offset: ({ id, ms }) => { const v = Math.max(-30000, Math.min(30000, Math.round(ms))); offsets.set(id, v); return v; },
+    lyrics_settings: () => ({ ...settings }),
+    lyrics_set_settings: ({ netease, trans }) => { settings = { netease: !!netease, trans: !!trans }; },
+    cover_color: ({ id }) => {
+      const i = index.get(id);
+      if (i == null || i % 5 === 4) return null;
+      const h = hash(id);
+      return [60 + (h & 127), 60 + ((h >> 7) & 127), 60 + ((h >> 14) & 127)];
+    },
+  };
+}
+
 function build(count, latin) {
   const r = rng(42);
   const roots = [
@@ -274,6 +349,7 @@ export function createMock() {
     },
     player_queue_clear: () => { up = []; emitQueue(); },
     player_state: () => ({ ...ps }),
+    ...lyricsCommands(lib),
   };
 
   if (qs.get('shot')) setTimeout(() => shot(qs.get('shot'), commands), 1200);
