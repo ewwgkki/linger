@@ -155,7 +155,8 @@ export function renderSongs(el, ctx) {
       <div class="meta">${songsMeta}</div>${acts}</div></section>`;
   }
   const { col, dir } = state.sort;
-  const sorts = state.album != null ? [['n', 'sort.track'], ...SORTS.filter((x) => x[0] !== 'b')] : SORTS;
+  const sorts = state.album != null ? [['n', 'sort.track'], ...SORTS.filter((x) => x[0] !== 'b')]
+    : state.root != null ? [...SORTS, ['fa', 'sort.dateAdded']] : SORTS;
   const bar = isScopedPage(state) ? pageQualityBar(selectSongs(lib.songs, { ...state, pageQ: null }), state.pageQ) : '';
   hero += `<div class="toolbar">${toolbarLeft(bar, chips(ctx))}<div class="sorts"><span>${esc(t('sort.label'))}</span><div class="seg" id="songsort">${
     sorts.map(([c, k]) => `<button data-sort="${c}" aria-pressed="${col === c}" data-dir="${dir > 0 ? '↑' : '↓'}">${esc(t(k))}</button>`).join('')}</div></div></div>`;

@@ -80,3 +80,8 @@ test('groupShelf honours search, quality and root', () => {
   assert.deepEqual(groupShelf(lib, 'artists', { ...base, quality: 'low' }).map((g) => g.name), ['邓紫棋']);
   assert.deepEqual(groupShelf(lib, 'artists', { ...base, root: 2 }).map((g) => g.name), ['']);
 });
+
+test('date added sorts newest first and undated songs last', () => {
+  const l = [song({ id: 'old', ad: 100 }), song({ id: 'none' }), song({ id: 'new', ad: 300 })];
+  assert.deepEqual(ids(selectSongs(l, { ...base, sort: { col: 'fa', dir: -1 } })), ['new', 'old', 'none']);
+});

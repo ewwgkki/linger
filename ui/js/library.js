@@ -39,6 +39,7 @@ function sortValue(s, col) {
   switch (col) {
     case 'n': return s.n || 999;
     case 's': return s.s;
+    case 'fa': return s.ad || 0;
     case 'br': return x.q === 'lossless' ? 9999 : s.br;
     case 'a': return x.a;
     case 'b': return x.b;

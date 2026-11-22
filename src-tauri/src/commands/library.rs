@@ -41,6 +41,8 @@ pub struct SongDto {
     pub p: String,
     pub st: u64,
     pub av: bool,
+    /// when the file was put in its folder (unix seconds)
+    pub ad: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -92,6 +94,7 @@ pub fn roots_dto(db: &Db, online: &HashSet<i64>) -> crate::db::Result<Vec<RootDt
 fn song_dto(s: SongRow, online: &HashSet<i64>) -> SongDto {
     SongDto {
         av: online.contains(&s.root_id),
+        ad: s.added.unwrap_or(s.mtime),
         id: s.id,
         t: s.title,
         a: s.artist,

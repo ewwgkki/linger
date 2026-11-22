@@ -54,7 +54,7 @@ function build(count, latin) {
         const br = br0 + (c === 'flac' ? Math.floor(r() * 200) : 0);
         const p = `${artist || 'Unknown'}/${album || 'Singles'}/${String(n).padStart(2, '0')} ${t}.${f}`;
         songs.push({ id: (hash(p + ai) >>> 0).toString(16).padStart(8, '0') + songs.length.toString(16), t, a: artist, b: album, n, s,
-          c, f, br, z: Math.round(s * br * 125), pc, r: root, p, st: 0, av: root !== 3 });
+          c, f, br, z: Math.round(s * br * 125), pc, r: root, p, st: 0, av: root !== 3, ad: 1760000000 + songs.length * 3600 });
       }
     }
     ai++;

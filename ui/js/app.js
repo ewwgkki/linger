@@ -304,7 +304,7 @@ $('view').addEventListener('click', (e) => {
   if (a) { e.stopPropagation(); go({ artist: a.dataset.artist, album: null, sort: { col: 'b', dir: 1 } }); return; }
   if (b) { e.stopPropagation(); go({ album: b.dataset.album, artist: null, sort: { col: 'n', dir: 1 } }); return; }
   const srt = tg.closest('[data-sort]');
-  if (srt) { const c = srt.dataset.sort; state.sort = { col: c, dir: state.sort.col === c ? -state.sort.dir : (c === 's' || c === 'br' ? -1 : 1) }; render(); return; }
+  if (srt) { const c = srt.dataset.sort; state.sort = { col: c, dir: state.sort.col === c ? -state.sort.dir : (c === 's' || c === 'br' || c === 'fa' ? -1 : 1) }; render(); return; }
   const cp = tg.closest('[data-copy]');
   if (cp) { copyPath(cp); return; }
   const hb = tg.closest('[data-heart]');

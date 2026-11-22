@@ -687,7 +687,7 @@ mod tests {
     }
 
     fn test_song(root_id: i64, rel: &str) -> SongRow {
-        SongRow { id: "x".into(), root_id, file_id: 1, rel: rel.into(), ext: "flac".into(), codec: "flac".into(),
+        SongRow { added: None, id: "x".into(), root_id, file_id: 1, rel: rel.into(), ext: "flac".into(), codec: "flac".into(),
             bitrate: 0, size: 0, cover: 0, title: String::new(), artist: String::new(), album: String::new(),
             track: 0, start_ms: 0, end_ms: None, duration: 0.0, mtime: 0 }
     }

@@ -39,6 +39,8 @@ pub struct SongRow {
     pub track: u32, pub start_ms: u64, pub end_ms: Option<u64>, pub duration: f64,
     /// the audio file's mtime (unix seconds) as of the last scan
     pub mtime: i64,
+    /// when the file was put in its folder (unix seconds), once the scanner has seen it
+    pub added: Option<i64>,
 }
 
 /// Each entry is one schema version (index + 1), applied atomically.
@@ -72,6 +74,8 @@ const MIGRATIONS: &[&str] = &[
      CREATE TABLE favorites(song_id TEXT PRIMARY KEY,
        title TEXT NOT NULL, artist TEXT NOT NULL, album TEXT NOT NULL, duration REAL NOT NULL, size INTEGER NOT NULL,
        added INTEGER NOT NULL);",
+    // when the file was put in its folder (creation time); filled in by the scanner
+    "ALTER TABLE files ADD COLUMN added INTEGER;",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -274,6 +278,27 @@ impl Db {
         tx.commit()?;
         Ok(())
     }
+    /// Records the date of files that have none yet; a file keeps its first date.
+    pub fn fill_added(&mut self, root_id: i64, files: &[(String, i64)]) -> Result<usize> {
+        let missing: std::collections::HashSet<String> = {
+            let mut st = self.conn.prepare("SELECT rel FROM files WHERE root_id=?1 AND added IS NULL")?;
+            let rows = st.query_map([root_id], |r| r.get(0))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        if missing.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.conn.transaction()?;
+        let mut n = 0;
+        {
+            let mut up = tx.prepare("UPDATE files SET added=?3 WHERE root_id=?1 AND rel=?2")?;
+            for (rel, at) in files.iter().filter(|(rel, _)| missing.contains(rel)) {
+                n += up.execute(params![root_id, rel, at])?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
     pub fn delete_files(&mut self, root_id: i64, rels: &[String]) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
@@ -288,7 +313,7 @@ impl Db {
 
     const SONG_SELECT: &'static str =
         "SELECT s.id, f.root_id, s.file_id, f.rel, f.ext, f.codec, f.bitrate, f.size, f.cover,
-                s.title, s.artist, s.album, s.track, s.start_ms, s.end_ms, s.duration, f.mtime
+                s.title, s.artist, s.album, s.track, s.start_ms, s.end_ms, s.duration, f.mtime, f.added
          FROM songs s JOIN files f ON f.id = s.file_id";
 
     fn map_song(r: &rusqlite::Row) -> rusqlite::Result<SongRow> {
@@ -297,7 +322,7 @@ impl Db {
             codec: r.get(5)?, bitrate: r.get(6)?, size: r.get::<_, i64>(7)? as u64, cover: r.get(8)?,
             title: r.get(9)?, artist: r.get(10)?, album: r.get(11)?, track: r.get(12)?,
             start_ms: r.get::<_, i64>(13)? as u64, end_ms: r.get::<_, Option<i64>>(14)?.map(|v| v as u64),
-            duration: r.get(15)?, mtime: r.get(16)?,
+            duration: r.get(15)?, mtime: r.get(16)?, added: r.get(17)?,
         })
     }
     pub fn all_songs(&self) -> Result<Vec<SongRow>> {
@@ -521,6 +546,19 @@ pub fn song_id(root_path: &str, rel: &str, start_ms: u64) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn fill_added_only_sets_missing_dates() {
+        let mut db = Db::open_in_memory().unwrap();
+        let r = db.add_root("/m").unwrap();
+        db.replace_file(r.id, &meta("a.mp3"), &[]).unwrap();
+        let added = |db: &Db| db.conn().query_row("SELECT added FROM files", [], |x| x.get::<_, Option<i64>>(0)).unwrap();
+        assert_eq!(added(&db), None);
+        assert_eq!(db.fill_added(r.id, &[("a.mp3".into(), 100), ("gone.mp3".into(), 5)]).unwrap(), 1);
+        assert_eq!(db.fill_added(r.id, &[("a.mp3".into(), 200)]).unwrap(), 0, "the first date is kept");
+        db.replace_file(r.id, &meta("a.mp3"), &[]).unwrap();
+        assert_eq!(added(&db), Some(100), "a re-read file keeps its date");
+    }
+
     fn meta(rel: &str) -> FileMeta {
         FileMeta { rel: rel.into(), ext: "mp3".into(), size: 10, mtime: 5, codec: "mp3".into(),
                    bitrate: 320, duration: 100.0, cover: 1, cue_sig: None }
@@ -659,7 +697,7 @@ mod tests {
         c.execute("INSERT INTO songs VALUES('s1',1,'t','a','b',1,0,NULL,1.0)", []).unwrap();
         assert_eq!(schema_version(&c).unwrap(), 1);
         let db = Db::init(c).unwrap();
-        assert_eq!(schema_version(db.conn()).unwrap(), 2);
+        assert_eq!(schema_version(db.conn()).unwrap(), MIGRATIONS.len() as i64);
         assert_eq!(db.song_count().unwrap(), 1);
         assert!(db.playlists().unwrap().is_empty());
     }

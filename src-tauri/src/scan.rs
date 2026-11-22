@@ -105,6 +105,8 @@ struct Entry {
     name: String,
     size: u64,
     mtime: i64,
+    /// creation time, or the modification time where the filesystem has none
+    added: i64,
 }
 #[derive(Debug, Default)]
 struct DirFiles {
@@ -129,6 +131,13 @@ fn abs_path(root: &Path, rel: &str) -> PathBuf {
         p.push(part);
     }
     p
+}
+
+fn added_of(m: &std::fs::Metadata) -> i64 {
+    m.created()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or_else(|| mtime_of(m), |d| d.as_secs() as i64)
 }
 
 fn mtime_of(m: &std::fs::Metadata) -> i64 {
@@ -183,7 +192,7 @@ fn walk(root: &Path) -> Walk {
                     partial = true;
                     continue;
                 };
-                let ent = Entry { name, size: m.len(), mtime: mtime_of(&m) };
+                let ent = Entry { name, size: m.len(), mtime: mtime_of(&m), added: added_of(&m) };
                 if is_audio { df.audio.push(ent) } else { df.cues.push(ent) }
             }
         }
@@ -424,6 +433,13 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
                 }
             }
         }
+
+        let added: Vec<(String, i64)> = w.dirs.iter()
+            .flat_map(|(d, df)| df.audio.iter().map(move |a| (join_rel(d, &a.name), a.added)))
+            .collect();
+        with(&mut |db| {
+            let _ = db.fill_added(root.id, &added);
+        });
 
         // Forget files no longer present - unless the root vanished mid-scan.
         let gone = gone_files(&sigs, &seen, &w.failed);

@@ -168,7 +168,7 @@ mod tests {
         (i.width(), i.height())
     }
     fn song_at(cover: u8, rel: &str) -> SongRow {
-        SongRow { id: "s".into(), root_id: 1, file_id: 7, rel: rel.into(), ext: "flac".into(), codec: "flac".into(),
+        SongRow { added: None, id: "s".into(), root_id: 1, file_id: 7, rel: rel.into(), ext: "flac".into(), codec: "flac".into(),
             bitrate: 0, size: 1234, cover, title: "".into(), artist: "".into(), album: "".into(), track: 1,
             start_ms: 0, end_ms: None, duration: 1.0, mtime: 1_700_000_000 }
     }
