@@ -7,7 +7,7 @@ import { art, badges, artistName } from './views/songs.js';
 import { pl, isSaved, cachedItems, loadItems, FAV } from './playlists.js';
 import { saveSongs } from './savepicker.js';
 import { toggleQueue } from './queue.js';
-import { onSong, onPos } from './lyrics.js';
+import { onSong, onPos, seekTo } from './lyrics.js';
 
 const $ = (id) => document.getElementById(id);
 const REPEAT_NEXT = { all: 'one', one: 'off', off: 'all' };
@@ -106,7 +106,7 @@ function applyState(st) {
   $('tdur').textContent = mmss(ps.dur);
   if (!seekDrag.dragging()) showPos(ps.pos);
   if (ps.id !== prevId) onSong(ps.id);
-  onPos(ps.pos / 1000, playing);
+  onPos(ps.pos, playing);
   if (ps.id !== prevId) {
     renderNow();
     markRows();
@@ -221,7 +221,7 @@ export function initPlayer(c) {
       const secs = (v / 1000) * (ps.dur || 0);
       holdPosUntil = performance.now() + 600;
       showPos(secs);
-      onPos(secs, ps.playing);
+      seekTo(secs, ps.playing);
       if (ps.dur) call('player_seek', { secs });
     },
   });

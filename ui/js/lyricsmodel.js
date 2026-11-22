@@ -52,6 +52,8 @@ export function clock() {
       if (playing && isPlaying && pos < cur && cur - pos < 400) return;
       base = pos; t0 = now; playing = !!isPlaying;
     },
+    /** A real jump (seek, new song): always snaps, even when only slightly backwards. */
+    seek(pos, isPlaying, now) { base = pos; t0 = now; playing = !!isPlaying; },
     at,
   };
 }

@@ -72,3 +72,48 @@ test('stale_response_is_ignored', async () => {
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(got, ['B']);
 });
+
+test('clock seek snaps even slightly backwards; jitter does not', () => {
+  const c = clock();
+  c.set(10000, true, 1000);
+  assert.equal(c.at(1500), 10500);
+  c.seek(10200, true, 1500); // 300 ms back, a real seek
+  assert.equal(c.at(1500), 10200);
+  c.set(10150, true, 1500); // jitter
+  assert.equal(c.at(1500), 10200);
+  c.seek(0, false, 1600); // song change
+  assert.equal(c.at(2600), 0);
+});
+
+test('store: setOffset accumulates, last wins, failure restores; choice beats slow get', async () => {
+  const calls = [];
+  let getResolve, failNext = false;
+  const stub = {
+      invoke: (cmd, a) => {
+        calls.push([cmd, a]);
+        if (cmd === 'lyrics_get') return new Promise((r) => { getResolve = () => r({ id: a.id, status: 'ok', kind: 'plain', lines: [], offset: 0 }); });
+        if (cmd === 'lyrics_set_offset') return failNext ? Promise.reject('x') : Promise.resolve(a.ms);
+        if (cmd === 'lyrics_choose') return Promise.resolve({ id: a.id, status: 'ok', kind: 'line', lines: [], offset: 0 });
+        return Promise.resolve(null);
+      },
+  };
+  const L = await import('../js/lyrics.js');
+  L.useBackend(stub);
+  L.setActive(true);
+  L.onSong('s1');
+  const pending = getResolve;
+  await L.choose('netease', '1');
+  pending(); // the slow get finishes after the choice
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(L.ly.data.kind, 'line');
+  const a = L.setOffset(500), b = L.setOffset(500), c = L.setOffset(-200);
+  assert.equal(L.ly.data.offset, 800);
+  await Promise.all([a, b, c]);
+  assert.equal(L.ly.data.offset, 800);
+  assert.deepEqual(calls.filter((x) => x[0] === 'lyrics_set_offset').map((x) => x[1].ms), [500, 1000, 800]);
+  failNext = true;
+  await L.setOffset(1000);
+  assert.equal(L.ly.data.offset, 800);
+  assert.equal(L.nowMs() >= 800, true);
+  L.onSong(null);
+});
