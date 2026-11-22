@@ -3,7 +3,7 @@
 use super::{byte, legacy_text, sub, tail, u32be, AudioInfo, Src, Tags};
 
 /// Contents of the top-level `moov` box, if any.
-fn find_moov(src: &mut Src) -> Option<Vec<u8>> {
+pub(super) fn find_moov(src: &mut Src) -> Option<Vec<u8>> {
     let size = src.size;
     let mut pos = 0u64;
     while pos + 8 <= size {
@@ -52,7 +52,7 @@ fn children(d: &[u8], start: usize) -> Vec<(&[u8], &[u8])> {
     out
 }
 
-fn find<'a>(d: &'a [u8], path: &[&[u8; 4]], start: usize) -> Option<&'a [u8]> {
+pub(super) fn find<'a>(d: &'a [u8], path: &[&[u8; 4]], start: usize) -> Option<&'a [u8]> {
     let (name, rest) = path.split_first()?;
     for (t, body) in children(d, start) {
         if t != &name[..] {

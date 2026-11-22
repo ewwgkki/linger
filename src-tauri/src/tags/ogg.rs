@@ -32,7 +32,7 @@ fn read_page(src: &mut Src, pos: u64) -> Option<Page> {
 }
 
 /// First two packets (identification + comment header) of the first logical stream.
-fn header_packets(src: &mut Src, start: u64) -> Option<(u32, Vec<Vec<u8>>)> {
+pub(super) fn header_packets(src: &mut Src, start: u64) -> Option<(u32, Vec<Vec<u8>>)> {
     let mut pos = start;
     let mut serial = None;
     let mut packets: Vec<Vec<u8>> = Vec::new();

@@ -9,6 +9,7 @@ use crate::text::{clean_text, decode_legacy, is_broken};
 mod ape;
 mod asf;
 mod cover;
+mod lyrics;
 mod flac;
 mod id3;
 mod mp4;
@@ -39,6 +40,11 @@ pub struct AudioInfo {
 /// Reads tags and technical info. Never panics; unreadable files give the default value.
 pub fn read_audio_info(path: &Path) -> AudioInfo {
     std::panic::catch_unwind(|| read_audio_info_inner(path)).unwrap_or_default()
+}
+
+/// Embedded lyrics text (SYLT converted to LRC); `None` when absent or unreadable.
+pub fn read_lyrics(path: &Path) -> Option<String> {
+    std::panic::catch_unwind(|| lyrics::read_lyrics(path)).ok().flatten()
 }
 
 /// Embedded cover (data, mime); the front cover is preferred.
