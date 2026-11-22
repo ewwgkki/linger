@@ -312,5 +312,8 @@
   "lyrics.promptPath": "Path to lyrics file",
   "lyrics.netease": "Search lyrics on NetEase Cloud Music",
   "lyrics.neteaseHint": "When off, only local lyrics and LRCLIB are used.",
-  "lyrics.saveError": "Could not save the setting"
+  "lyrics.saveError": "Could not save the setting",
+  "np.open": "Open the play page",
+  "np.close": "Close the play page",
+  "np.collapse": "Collapse"
 }

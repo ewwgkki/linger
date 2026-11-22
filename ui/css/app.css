@@ -172,8 +172,11 @@ mark{background:color-mix(in srgb,var(--accent) 25%,transparent);color:inherit;b
 /* Player bar */
 .player{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--surface);background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:saturate(1.5) blur(18px);-webkit-backdrop-filter:saturate(1.5) blur(18px);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 .pl-in{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);gap:6px 24px;align-items:center;padding:12px 24px}
-.pl-now{display:flex;gap:12px;align-items:center;min-width:0;cursor:pointer;border-radius:10px}
-.pl-now:hover .np-t{color:var(--accent)}
+.pl-now{display:flex;gap:12px;align-items:center;min-width:0}
+.pl-cover{flex:none;display:block;padding:0;border:0;background:none;border-radius:8px;cursor:pointer;transition:transform .15s}
+.pl-cover:hover{transform:scale(1.05)}
+#plnow{cursor:pointer;border-radius:6px}
+#plnow:hover .np-t{color:var(--accent)}
 .np{min-width:0}
 .np-t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}
 .np-a{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -497,3 +500,47 @@ button.ly-line:hover{color:var(--ink)}
 .lys-tag{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:0 7px;color:var(--muted)}
 .lys-tag.on{color:var(--ok);border-color:var(--ok)}
 @media (max-width:560px){.lys-form{grid-template-columns:1fr}}
+
+/* Full-screen play page: sits under the player bar (30) and the drawers (32) */
+.nowplaying{--np-mute:color-mix(in srgb,var(--np-ink,#fbfaf7) 72%,var(--np-top,#26272f));position:fixed;inset:0 0 var(--player-h) 0;z-index:28;display:flex;flex-direction:column;overflow:hidden;color:var(--np-ink,#fbfaf7);background:linear-gradient(160deg,var(--np-top,#26272f),var(--np-bottom,#101014));transition:background-color .4s}
+body.np-open .selbar{display:none}
+html:has(body.np-open){scrollbar-width:none}
+body.np-open .player{--danger:#ffb9a8;--ink:var(--np-ink,#fbfaf7);--muted:color-mix(in srgb,var(--np-ink,#fbfaf7) 72%,var(--np-bottom,#101014));--bg:var(--np-bottom,#101014);--surface-2:rgba(255,255,255,.13);--line:rgba(255,255,255,.22);--accent:var(--np-ink,#fbfaf7);--accent-soft:rgba(255,255,255,.16);background:var(--np-bottom,#101014);border-top-color:rgba(255,255,255,.12);color:var(--ink)}
+.np-close{position:absolute;top:max(14px,env(safe-area-inset-top,0px));left:18px;z-index:1;display:inline-flex;align-items:center;gap:6px;padding:7px 14px 7px 10px;border:0;border-radius:999px;background:rgba(255,255,255,.12);color:inherit;font:inherit;font-size:13.5px;cursor:pointer}
+.np-close:hover{background:rgba(255,255,255,.22)}
+.np-close svg.i{width:16px;height:16px;transform:rotate(90deg)}
+.np-close:focus-visible,.nowplaying .ly-tbtn:focus-visible,.nowplaying .btn:focus-visible,.nowplaying .ly-line:focus-visible{outline:2px solid var(--np-ink,#fbfaf7);outline-offset:1px}
+.np-stage{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:clamp(20px,4vw,64px);padding:clamp(56px,8vh,76px) clamp(24px,5vw,72px) 14px}
+.np-left{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center}
+.np-platter{position:relative;width:min(100%,62vh,460px);aspect-ratio:1;border-radius:50%;box-shadow:0 18px 50px rgba(0,0,0,.45)}
+.np-platter::after{content:"";position:absolute;inset:0;border-radius:50%;pointer-events:none;background:conic-gradient(from 35deg,rgba(255,255,255,.13),transparent 14%,transparent 50%,rgba(255,255,255,.09) 62%,transparent 76%,rgba(255,255,255,.13));-webkit-mask:radial-gradient(circle closest-side,transparent 65%,#000 65.5%);mask:radial-gradient(circle closest-side,transparent 65%,#000 65.5%)}
+.np-disc{width:100%;height:100%;border-radius:50%;display:grid;place-items:center;background:repeating-radial-gradient(circle,#131316 0 2px,#1c1c20 2px 4px);box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);animation:np-spin 26s linear infinite paused;will-change:transform}
+.np-disc.spin{animation-play-state:running}
+@keyframes np-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.np-disc{animation:none}}
+.np-cv{width:64%;aspect-ratio:1;border-radius:50%;overflow:hidden;box-shadow:0 0 0 5px rgba(0,0,0,.55)}
+.np-cv .art{width:100%;background:color-mix(in srgb,var(--np-top,#26272f) 70%,#fff 10%);color:var(--np-ink,#fbfaf7)}
+.np-cv .art>svg.i{max-width:88px;max-height:88px}
+.np-right{min-width:0;min-height:0;display:flex;flex-direction:column}
+.np-meta{flex:none;text-align:center;padding-bottom:10px}
+.np-meta h2{margin:0;font-size:clamp(20px,2.4vw,28px);line-height:1.3;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.np-meta p{margin:3px 0 0;font-size:14px;color:var(--np-mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nowplaying .ly-scroll{--ly-on:var(--np-ink,#fbfaf7);--ly-off:color-mix(in srgb,var(--np-ink,#fbfaf7) 58%,var(--np-top,#26272f));scrollbar-color:rgba(255,255,255,.28) transparent}
+.nowplaying .ly-line{font-size:clamp(17px,1.7vw,21px);color:var(--np-mute)}
+.nowplaying button.ly-line:hover,.nowplaying .ly-line.cur,.nowplaying .ly-line.plain{color:var(--np-ink,#fbfaf7)}
+.nowplaying .ly-state{color:var(--np-mute)}
+.nowplaying .ly-state svg.i{color:var(--np-mute)}
+.nowplaying .ly-state .btn{background:rgba(255,255,255,.14);color:inherit;border-color:rgba(255,255,255,.3)}
+.nowplaying .ly-tools{border-top-color:rgba(255,255,255,.14);padding-inline:0}
+.nowplaying .ly-tools-row{justify-content:center}
+.nowplaying .ly-tbtn,.nowplaying .ly-src,.nowplaying #nploffset{color:var(--np-mute)}
+.nowplaying .ly-src{flex:0 1 auto;padding-left:6px}
+.nowplaying .ly-tbtn:hover{background:rgba(255,255,255,.14);color:var(--np-ink,#fbfaf7)}
+.nowplaying .ly-toggle[aria-pressed="true"]{color:var(--np-ink,#fbfaf7);background:rgba(255,255,255,.16)}
+@media (max-width:760px){
+  .np-stage{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:10px;padding:58px 16px 8px}
+  .np-platter{width:min(38vw,22vh,150px)}
+  .np-meta{padding-bottom:6px}
+  .nowplaying .ly-line{font-size:16px;padding-inline:18px}
+  .nowplaying .ly-src{display:none}
+}

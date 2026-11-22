@@ -17,6 +17,7 @@ import { saveSongs, pickerOpen } from './savepicker.js';
 import { initQueue } from './queue.js';
 import { initLyrics } from './lyrics.js';
 import { initLyricsPanel } from './lyricspanel.js';
+import { initNowPlaying, nowPlayingOpen } from './nowplaying.js';
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -436,9 +437,9 @@ $('q').addEventListener('input', (e) => { clearTimeout(qt); qt = setTimeout(() =
 $('clearq').onclick = () => { resetSearch(); render(); $('q').focus(); };
 document.addEventListener('keydown', (e) => {
   const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) || $('settings').open || $('namedlg').open || $('confirmdlg').open;
-  if (e.key === '/' && !typing) { e.preventDefault(); $('q').focus(); }
+  if (e.key === '/' && !typing && !nowPlayingOpen()) { e.preventDefault(); $('q').focus(); }
   const overlay = menuOpen() || pickerOpen() || !!document.querySelector('dialog[open]');
-  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing && !overlay && ctx.view && ctx.list.length) {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'a' && !typing && !overlay && !nowPlayingOpen() && ctx.view && ctx.list.length) {
     e.preventDefault();
     selectAll(ctx.sel, listIds());
     paintSel();
@@ -484,6 +485,7 @@ async function boot() {
   initQueue(ctx);
   initLyrics(ctx);
   initLyricsPanel(ctx);
+  initNowPlaying(ctx);
   await initPlayer(ctx);
   // first start: nothing to show until a folder is added
   if (!ctx.lib.roots.length) ctx.openSettings();

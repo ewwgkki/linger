@@ -99,7 +99,7 @@
 <div class="player" id="player" hidden>
   <div class="pl-in">
     <div class="pl-left">
-      <div class="pl-now" id="plnow" data-i18n-title="player.reveal" role="button" tabindex="0"><span id="plcv"></span><div class="np"><div class="np-t" id="nptitle">&mdash;</div><div class="np-a" id="npartist"></div></div></div>
+      <div class="pl-now"><button class="pl-cover" id="plcover" type="button" aria-expanded="false" aria-controls="nowplaying" data-i18n-title="np.open" data-i18n-aria-label="np.open"><span id="plcv"></span></button><div class="np" id="plnow" data-i18n-title="player.reveal" role="button" tabindex="0"><div class="np-t" id="nptitle">&mdash;</div><div class="np-a" id="npartist"></div></div></div>
       <button class="tbtn heart" id="plsave" type="button" aria-pressed="false" data-i18n-title="menu.saveTo" data-i18n-aria-label="menu.saveTo"><svg class="i"><use href="#i-heart" id="plsaveicon"/></svg></button>
     </div>
     <div class="pl-mid">
@@ -157,6 +157,30 @@
     <div class="ly-tools-row"><span class="ly-src" id="lysrc"></span><button class="ly-tbtn" id="lysearch" type="button"><svg class="i"><use href="#i-search"/></svg><span data-i18n="lyrics.search"></span></button></div>
   </div>
 </aside>
+
+<section class="nowplaying" id="nowplaying" aria-labelledby="npltitle" hidden>
+  <button class="np-close" id="nplclose" type="button"><svg class="i"><use href="#i-chev"/></svg><span data-i18n="np.collapse"></span></button>
+  <div class="np-stage">
+    <div class="np-left"><div class="np-platter" id="nplplatter"><div class="np-disc" id="npldisc"><div class="np-cv" id="nplcv"></div></div></div></div>
+    <div class="np-right">
+      <div class="np-meta"><h2 id="npltitle"></h2><p id="nplartist"></p></div>
+      <div class="ly-state" id="nplstate" hidden><span id="nplstateicon"></span><p id="nplstatemsg" role="status"></p><button class="btn" id="nplstatebtn" type="button" hidden></button></div>
+      <div class="ly-scroll" id="npllines" tabindex="-1" hidden></div>
+      <div class="ly-tools" id="npltools" hidden>
+        <div class="ly-tools-row">
+          <div class="ly-offset" id="nploffsetbox" role="group" data-i18n-aria-label="lyrics.offsetGroup">
+            <button class="ly-tbtn" id="nplearlier" type="button" data-i18n="lyrics.earlier"></button>
+            <span id="nploffset" data-i18n-title="lyrics.offsetTip"></span>
+            <button class="ly-tbtn" id="npllater" type="button" data-i18n="lyrics.later"></button>
+          </div>
+          <button class="ly-tbtn ly-toggle" id="npltrans" type="button" aria-pressed="true" data-i18n="lyrics.trans" hidden></button>
+          <span class="ly-src" id="nplsrc"></span>
+          <button class="ly-tbtn" id="nplsearch" type="button"><svg class="i"><use href="#i-search"/></svg><span data-i18n="lyrics.search"></span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <div class="menu" id="menu" role="menu" data-i18n-aria-label="menu.label" hidden></div>
 <div class="savepicker" id="savepicker" role="dialog" data-i18n-aria-label="save.title" hidden></div>

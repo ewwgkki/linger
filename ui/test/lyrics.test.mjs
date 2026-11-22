@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill, pickStillValid } from '../js/lyricsmodel.js';
+import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill, pickStillValid, backdropColors } from '../js/lyricsmodel.js';
 
 const L = (start, text = 'x') => ({ start, end: null, text, words: [], trans: null });
 
@@ -188,4 +188,33 @@ test('pickStillValid: a picked file applies only to the song it was picked for',
   assert.equal(pickStillValid('a', null, true), false); // playback stopped
   assert.equal(pickStillValid('a', 'a', false), false); // dialog closed meanwhile
   assert.equal(pickStillValid(null, null, true), false); // no song at all
+});
+
+const lumOf = (hex) => {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [lumOf(a), lumOf(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+test('backdrop keeps text readable', () => {
+  const colors = [[255, 255, 255], [0, 0, 0], [128, 128, 128], [255, 0, 0], [255, 255, 0]];
+  for (const c of colors) {
+    const { top, bottom, ink } = backdropColors(c);
+    for (const v of [top, bottom, ink]) assert.match(v, /^#[0-9a-f]{6}$/);
+    assert.ok(contrast(ink, top) >= 4.5, `${c} ink on top: ${contrast(ink, top)}`);
+    assert.ok(contrast(ink, bottom) >= 4.5, `${c} ink on bottom: ${contrast(ink, bottom)}`);
+  }
+});
+
+test('backdrop keeps the cover hue and has a default for no cover', () => {
+  const red = backdropColors([220, 30, 30]).top;
+  assert.ok(parseInt(red.slice(1, 3), 16) > parseInt(red.slice(3, 5), 16), red);
+  for (const bad of [null, undefined, [1, 2], ['a', 'b', 'c']]) {
+    const d = backdropColors(bad);
+    assert.ok(contrast(d.ink, d.top) >= 4.5 && contrast(d.ink, d.bottom) >= 4.5);
+  }
 });

@@ -1,12 +1,13 @@
 // Fake backend for browser previews and screenshots (never loaded inside Tauri).
 // URL params: ?mock=<song count> (default 400, 0 = empty library), &ffmpeg=0, &lang=en, &theme=dark,
-// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag|import|report|ly-word|ly-line|ly-plain|ly-none|ly-retry (screenshots only:
+// &pl=0 (start without playlists or favorites), &shot=sel|menu|picker|menu1|queue|qmenu|drag|import|report|ly-word|ly-line|ly-plain|ly-none|ly-retry|np-<same kinds> (screenshots only:
 // selects rows 0-3, 5, 6 with synthetic clicks, then opens the context menu, then the "save to" popover from it;
 // menu1: plays the first playable row and opens the menu for row 4 alone; queue: plays the list, queues three
 // songs and opens the queue panel; qmenu: also right-clicks a queued row; drag: starts dragging row 1 by its
 // grip down to row 4 on a playlist page; import: opens settings at the import section; report: runs the mock import
 // through the settings button flow and shows the report dialog; ly-<kind>: plays a song with that kind of lyrics
-// and opens the lyrics panel, with &pos=<secs>, &paused=1, &lylong=1 for a 1000-line song).
+// and opens the lyrics panel (np-<kind>: the full-screen page, also &npcolor=r,g,b|none, &npnocover=1, &npslow=<ms>), with
+// &pos=<secs>, &paused=1, &lylong=1 for a 1000-line song).
 import { setCoverSource } from '../js/util.js';
 
 function rng(seed) {
@@ -61,7 +62,7 @@ const LY_KINDS = ['word', 'line', 'plain', 'none', 'retry', 'word'];
 function lyricsCommands(lib) {
   const index = new Map(lib.songs.map((x, i) => [x.id, i]));
   const offsets = new Map(), chosen = new Map(), retried = new Set();
-  let settings = { netease: true, trans: true };
+  let settings = { netease: true, trans: true }, slowDone = false;
   const kindOf = (id) => LY_KINDS[(index.get(id) ?? 3) % LY_KINDS.length];
   const get = (id) => {
     const off = offsets.get(id) || 0;
@@ -99,7 +100,12 @@ function lyricsCommands(lib) {
     lyrics_set_offset: ({ id, ms }) => { const v = Math.max(-30000, Math.min(30000, Math.round(ms))); offsets.set(id, v); return v; },
     lyrics_settings: () => ({ ...settings }),
     lyrics_set_settings: ({ netease, trans }) => { settings = { netease: !!netease, trans: !!trans }; },
-    cover_color: ({ id }) => {
+    cover_color: async ({ id }) => {
+      const qs = new URLSearchParams(location.search);
+      // &npslow=<ms>: the first answer arrives late (a slow reply for the previous song)
+      if (qs.has('npslow') && !slowDone) { slowDone = true; await new Promise((r) => setTimeout(r, +qs.get('npslow'))); return [255, 0, 0]; }
+      // &npcolor=r,g,b or &npcolor=none: force the cover colour
+      if (qs.has('npcolor')) return qs.get('npcolor') === 'none' ? null : qs.get('npcolor').split(',').map(Number);
       const i = index.get(id);
       if (i == null || i % 5 === 4) return null;
       const h = hash(id);
@@ -178,6 +184,7 @@ export function createMock() {
     emitQueue();
   };
   const load = (i) => { qi = i; playId(queue[qi]); };
+  window.__mockStop = () => playId(null); // browser checks: playback ends with no current song
   const advance = () => {
     if (up.length) playId(up.shift());
     else if (qi + 1 < queue.length) load(qi + 1);
@@ -380,15 +387,15 @@ export function createMock() {
 function shot(what, commands) {
   const rows = () => [...document.querySelectorAll('#songlist .song')];
   const click = (el, o) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, ...o }));
-  if (what.startsWith('ly-')) {
+  if (what.startsWith('ly-') || what.startsWith('np-')) {
     const qs = new URLSearchParams(location.search), kind = what.slice(3);
     const songs = commands.get_library().songs;
-    const i = songs.findIndex((s, k) => s.av && LY_KINDS[k % LY_KINDS.length] === kind);
+    const i = songs.findIndex((s, k) => s.av && LY_KINDS[k % LY_KINDS.length] === kind && (!qs.has('npnocover') || !s.pc));
     if (i < 0) return;
     commands.player_play_list({ ids: [songs[i].id, songs[(i + 1) % songs.length].id], start: 0 });
     if (qs.has('pos')) commands.player_seek({ secs: +qs.get('pos') });
     if (qs.get('paused') === '1') commands.player_toggle();
-    setTimeout(() => document.getElementById('lyricsbtn').click(), 150);
+    setTimeout(() => document.getElementById(what.startsWith('np-') ? 'plcover' : 'lyricsbtn').click(), 150);
     return;
   }
   if (what === 'import' || what === 'report') {

@@ -8,6 +8,7 @@ import { pl, isSaved, cachedItems, loadItems, FAV } from './playlists.js';
 import { saveSongs } from './savepicker.js';
 import { toggleQueue } from './queue.js';
 import { onSong, onPos, seekTo } from './lyrics.js';
+import { closeNowPlaying } from './nowplaying.js';
 
 const $ = (id) => document.getElementById(id);
 const REPEAT_NEXT = { all: 'one', one: 'off', off: 'all' };
@@ -206,8 +207,15 @@ function scrollToRow(i, id, force) {
 
 export function initPlayer(c) {
   ctx = c;
-  $('plnow').onclick = () => revealNow(true);
-  $('plnow').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); revealNow(true); } };
+  // the cover (#plcover) opens the full-screen page; the title and artist reveal the source list
+  const reveal = () => { closeNowPlaying(); revealNow(true); };
+  $('plnow').onclick = reveal;
+  $('plnow').onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation(); // Space here activates this control instead of play/pause
+    reveal();
+  };
   $('playpause').onclick = toggle;
   $('plsave').onclick = () => { if (songById(ps.id)) saveSongs([ps.id], $('plsave'), ctx); };
   $('queuebtn').onclick = () => toggleQueue();

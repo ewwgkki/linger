@@ -104,3 +104,29 @@ export function latest() {
     return me === n ? r : STALE;
   };
 }
+
+const DEFAULT_BACKDROP = [58, 60, 74];
+/** Brightest the backdrop's top colour may get; light ink stays well above 4.5:1 on it. */
+const BACKDROP_MAX_LUM = 0.075;
+
+const channelLum = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+const relLum = ([r, g, b]) => 0.2126 * channelLum(r) + 0.7152 * channelLum(g) + 0.0722 * channelLum(b);
+const hex = (rgb) => '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+
+/**
+ * Full-screen page colours from a cover colour: a darkened gradient that keeps the hue, with light
+ * ink. Any input (also none) gives at least 4.5:1 for `ink` on both `top` and `bottom`.
+ */
+export function backdropColors(rgb) {
+  const ok = Array.isArray(rgb) && rgb.length === 3 && rgb.every((v) => Number.isFinite(v));
+  const base = (ok ? rgb : DEFAULT_BACKDROP).map((v) => Math.max(0, Math.min(255, v)));
+  // pure black would give a flat page: lift it slightly
+  const lifted = base.map((v) => v + (255 - v) * 0.07);
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 16; i++) {
+    const k = (lo + hi) / 2;
+    if (relLum(lifted.map((v) => v * k)) <= BACKDROP_MAX_LUM) lo = k; else hi = k;
+  }
+  const top = lifted.map((v) => v * lo);
+  return { top: hex(top), bottom: hex(top.map((v) => v * 0.42)), ink: '#fbfaf7' };
+}
