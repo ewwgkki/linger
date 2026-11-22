@@ -96,6 +96,30 @@ struct Raw {
     start: i64,
     text: String,
     words: Vec<RawWord>,
+    /// index of the source line
+    seq: usize,
+    trans: Option<String>,
+}
+
+/// Bilingual LRC: when the next source line has the same stamp, it becomes this line's translation.
+/// Only the second line of a stamp folds; further ones stay separate lines.
+fn fold_pairs(raws: Vec<Raw>) -> Vec<Raw> {
+    let mut out: Vec<Raw> = Vec::with_capacity(raws.len());
+    let mut can_fold = false;
+    for r in raws {
+        let Some(p) = out.last_mut().filter(|p| p.start == r.start) else {
+            can_fold = true;
+            out.push(r);
+            continue;
+        };
+        if can_fold && r.seq == p.seq + 1 && r.text != p.text {
+            p.trans = Some(r.text);
+        } else {
+            out.push(r);
+        }
+        can_fold = false;
+    }
+    out
 }
 
 fn clamp(t: i64, offset: i64) -> u32 {
@@ -122,6 +146,9 @@ fn parse_words(body: &str, first_stamp: i64) -> Option<(String, Vec<RawWord>)> {
         let to = caps.get(i + 1).map_or(body.len(), |n| n.get(0).unwrap().start());
         let text = &body[from..to];
         if text.trim().is_empty() {
+            if let Some(p) = words.last_mut() {
+                p.text.push_str(text); // a space between words belongs to the word before it
+            }
             continue;
         }
         words.push(RawWord { start: times[i], end: times.get(i + 1).copied(), text: text.to_string() });
@@ -136,6 +163,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
     let mut any_stamp = false;
     let mut raws: Vec<Raw> = Vec::new();
     let mut plain: Vec<String> = Vec::new();
+    let mut seq = 0usize;
 
     for line in text.lines() {
         let mut rest = line.trim();
@@ -149,7 +177,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
                     stamps.push(t);
                 }
             } else if tag_re().is_match(inner) {
-                if let Some(v) = inner.strip_prefix("offset:") {
+                if let Some((_, v)) = inner.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case("offset")) {
                     if let Ok(o) = v.trim().trim_start_matches('+').parse::<i64>() {
                         offset = o;
                     }
@@ -173,6 +201,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
         if line_text.is_empty() {
             continue;
         }
+        seq += 1;
         for &s in &stamps {
             let delta = s - stamps[0];
             raws.push(Raw {
@@ -182,6 +211,8 @@ pub fn parse_lrc(text: &str) -> Parsed {
                     .iter()
                     .map(|w| RawWord { start: w.start.saturating_add(delta), end: w.end.map(|e| e.saturating_add(delta)), text: w.text.clone() })
                     .collect(),
+                seq,
+                trans: None,
             });
         }
     }
@@ -196,6 +227,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
     }
 
     raws.sort_by_key(|r| clamp(r.start, offset));
+    let raws = fold_pairs(raws);
     let starts: Vec<u32> = raws.iter().map(|r| clamp(r.start, offset)).collect();
     let lines = raws
         .into_iter()
@@ -211,7 +243,7 @@ pub fn parse_lrc(text: &str) -> Parsed {
                     Word { start: s, end: e, text: w.text }
                 })
                 .collect();
-            Line { start: Some(starts[i]), end, text: r.text, words, trans: None }
+            Line { start: Some(starts[i]), end, text: r.text, words, trans: r.trans }
         })
         .collect();
     Parsed { lines }
@@ -230,15 +262,18 @@ pub fn parse_yrc(text: &str) -> Parsed {
         let end = start.saturating_add(dur);
         let body = &line[h.get(0).unwrap().end()..];
         let caps: Vec<_> = yrc_word_re().captures_iter(body).collect();
-        let mut words = Vec::new();
+        let mut words: Vec<Word> = Vec::new();
         for (i, c) in caps.iter().enumerate() {
             let from = c.get(0).unwrap().end();
             let to = caps.get(i + 1).map_or(body.len(), |n| n.get(0).unwrap().start());
             let t = &body[from..to];
-            let (Ok(ws), Ok(wd)) = (c[1].parse::<u32>(), c[2].parse::<u32>()) else { continue };
             if t.trim().is_empty() {
+                if let Some(p) = words.last_mut() {
+                    p.text.push_str(t);
+                }
                 continue;
             }
+            let (Ok(ws), Ok(wd)) = (c[1].parse::<u32>(), c[2].parse::<u32>()) else { continue };
             words.push(Word { start: ws, end: ws.saturating_add(wd), text: t.to_string() });
         }
         let text: String = if caps.is_empty() {
@@ -385,6 +420,70 @@ mod tests {
         merge_translation(&mut base, &trans);
         assert_eq!(base.lines[0].trans.as_deref(), Some("甲"));
         assert_eq!(base.lines[1].trans, None);
+    }
+
+    #[test]
+    fn bilingual_same_stamp_folds_into_trans() {
+        let p = parse_lrc("[00:01.00]Hello\n[00:01.00]你好\n[00:03.00]World\n[00:03.00]世界");
+        assert_eq!(pairs(&p), vec![(Some(1000), "Hello"), (Some(3000), "World")]);
+        assert_eq!(p.lines[0].trans.as_deref(), Some("你好"));
+        assert_eq!(p.lines[1].trans.as_deref(), Some("世界"));
+        assert_eq!(p.lines[0].end, Some(3000));
+    }
+
+    #[test]
+    fn third_same_stamp_line_stays_separate() {
+        let p = parse_lrc("[00:01.00]a\n[00:01.00]b\n[00:01.00]c\n[00:01.00]d\n[00:02.00]e");
+        assert_eq!(pairs(&p), vec![(Some(1000), "a"), (Some(1000), "c"), (Some(1000), "d"), (Some(2000), "e")]);
+        assert_eq!(p.lines[0].trans.as_deref(), Some("b"));
+        assert_eq!((p.lines[1].trans.as_deref(), p.lines[2].trans.as_deref()), (None, None));
+    }
+
+    #[test]
+    fn repeated_stamps_do_not_fold() {
+        let p = parse_lrc("[00:05.00][00:01.00]副歌\n[00:03.00]主歌");
+        assert!(p.lines.iter().all(|l| l.trans.is_none()));
+        let same = parse_lrc("[00:01.00][00:01.00]副歌\n[00:03.00]主歌");
+        assert!(same.lines.iter().all(|l| l.trans.is_none()));
+        let dup = parse_lrc("[00:01.00]副歌\n[00:01.00]副歌");
+        assert!(dup.lines.iter().all(|l| l.trans.is_none()));
+    }
+
+    #[test]
+    fn repeated_bilingual_pairs_fold_at_each_stamp() {
+        let p = parse_lrc("[00:01.00][00:05.00]Hello\n[00:01.00][00:05.00]你好");
+        assert_eq!(pairs(&p), vec![(Some(1000), "Hello"), (Some(5000), "Hello")]);
+        assert!(p.lines.iter().all(|l| l.trans.as_deref() == Some("你好")));
+    }
+
+    #[test]
+    fn stamps_clamped_together_are_not_a_pair() {
+        let p = parse_lrc("[offset:+500]\n[00:00.10]甲\n[00:00.20]乙");
+        assert_eq!(pairs(&p), vec![(Some(0), "甲"), (Some(0), "乙")]);
+        assert!(p.lines.iter().all(|l| l.trans.is_none()));
+    }
+
+    #[test]
+    fn enhanced_lrc_keeps_spaces_between_words() {
+        let p = parse_lrc("[00:01.00]<00:01.00>Hello<00:01.50> <00:02.00>world");
+        assert_eq!(p.lines[0].text, "Hello world");
+        let w: Vec<_> = p.lines[0].words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(w, vec!["Hello ", "world"]);
+    }
+
+    #[test]
+    fn yrc_keeps_spaces_between_words() {
+        let p = parse_yrc("[1000,1000](1000,400,0)Hello(1400,10,0) (1410,590,0)world");
+        assert_eq!(p.lines[0].text, "Hello world");
+        assert_eq!(p.lines[0].words.len(), 2);
+    }
+
+    #[test]
+    fn offset_tag_any_case() {
+        for tag in ["Offset", "OFFSET", "oFfSeT"] {
+            let p = parse_lrc(&format!("[{tag}:+500]\n[00:01.00]甲"));
+            assert_eq!(p.lines[0].start, Some(500), "{tag}");
+        }
     }
 
     #[test]

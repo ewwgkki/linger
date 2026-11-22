@@ -61,12 +61,28 @@ fn shape_ok(s: &str, array: bool) -> Result<(), NetError> {
     }
 }
 
+/// LRCLIB rejects empty fields: a blank artist is left out, a blank title searches by artist.
+fn search_params(q: &Query) -> Vec<(&'static str, &str)> {
+    let (title, artist) = (q.title.trim(), q.artist.trim());
+    if title.is_empty() {
+        return vec![("q", artist)];
+    }
+    let mut params = vec![("track_name", title)];
+    if !artist.is_empty() {
+        params.push(("artist_name", artist));
+    }
+    params
+}
+
 impl Provider for Lrclib {
     fn name(&self) -> &'static str {
         "lrclib"
     }
 
     fn best(&self, q: &Query) -> Result<Option<Raw>, NetError> {
+        if !super::online::has_artist(q) {
+            return Ok(None);
+        }
         let dur = (q.duration.round() as i64).to_string();
         let mut params = vec![("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
         if !q.album.is_empty() {
@@ -88,7 +104,7 @@ impl Provider for Lrclib {
     }
 
     fn search(&self, q: &Query) -> Result<Vec<Candidate>, NetError> {
-        let params = [("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
+        let params = search_params(q);
         match http_get(&format!("{BASE}/search"), &params, &[("User-Agent", UA)])? {
             Some(body) => {
                 shape_ok(&body, true)?;
@@ -140,6 +156,22 @@ mod tests {
         assert_eq!(shape_ok("\"x\"", true), Err(NetError));
         assert_eq!(shape_ok("{}", false), Ok(()));
         assert_eq!(shape_ok("[]", true), Ok(()));
+    }
+
+    fn query(title: &str, artist: &str) -> Query {
+        Query { title: title.into(), artist: artist.into(), album: String::new(), duration: 100.0 }
+    }
+
+    #[test]
+    fn search_omits_blank_fields() {
+        assert_eq!(search_params(&query("A", "B")), vec![("track_name", "A"), ("artist_name", "B")]);
+        assert_eq!(search_params(&query("A", "  ")), vec![("track_name", "A")]);
+        assert_eq!(search_params(&query("", "B")), vec![("q", "B")]);
+    }
+
+    #[test]
+    fn best_without_artist_makes_no_request() {
+        assert_eq!(Lrclib.best(&query("A", "")), Ok(None));
     }
 
     #[test]

@@ -105,6 +105,11 @@ pub fn http_post_form(
     finish(req.send_form(form))
 }
 
+/// Auto-match needs an artist.
+pub fn has_artist(q: &Query) -> bool {
+    !q.artist.trim().is_empty()
+}
+
 fn is_cover(title: &str) -> bool {
     let t = title.to_lowercase();
     if ["原唱", "翻唱", "翻自"].iter().any(|m| t.contains(m)) {
@@ -255,6 +260,13 @@ mod tests {
         assert!(pick_best(&c, &q("A", "B", 205.0)).is_none());
         assert!(pick_best(&c, &q("A", "B", 202.0)).is_some());
         assert!(pick_best(&c, &q("A", "B", 0.0)).is_some());
+    }
+
+    #[test]
+    fn auto_match_needs_an_artist() {
+        assert!(has_artist(&q("A", "B", 1.0)));
+        assert!(!has_artist(&q("A", "", 1.0)));
+        assert!(!has_artist(&q("A", "  ", 1.0)));
     }
 
     #[test]

@@ -2,6 +2,7 @@
 use super::online::{Provider, Query, Raw};
 use super::{merge_translation, parse_lrc, parse_yrc, Parsed};
 use crate::db::{Db, LyricRow, SongRow};
+use crate::import::matcher::norm_title;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
@@ -42,7 +43,22 @@ fn parse_texts(yrc: Option<&str>, lrc: Option<&str>, plain: Option<&str>, trans:
     p
 }
 
-pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: &[&dyn Provider], now: i64) -> Resolved {
+/// What a "none" answer depended on: normalized tags, rounded duration, the providers asked.
+fn none_key(song: &SongRow, providers: &[&dyn Provider]) -> String {
+    let names: Vec<&str> = providers.iter().map(|p| p.name()).collect();
+    let text = [
+        norm_title(&song.title),
+        song.artist.trim().to_lowercase(),
+        song.album.trim().to_lowercase(),
+        (song.duration.round() as i64).to_string(),
+        names.join(","),
+    ].join("\0");
+    sha1_smol::Sha1::from(text).digest().to_string()[..16].to_string()
+}
+
+/// `keep_going` is checked before each provider call: once false (the song is no longer current)
+/// the lookup stops with "retry" and writes nothing.
+pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: &[&dyn Provider], now: i64, keep_going: &dyn Fn() -> bool) -> Resolved {
     let cached = lock(db).lyric(&song.id).ok().flatten();
 
     // 1. manual choice
@@ -78,13 +94,15 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
     }
 
     // 5-6. cache
+    let key = none_key(song, providers);
     if let Some(row) = &cached {
         if row.status == "ok" {
             let p = parsed_of(row);
             if !p.is_empty() {
                 return ok(p, row.source.as_deref().unwrap_or("manual"));
             }
-        } else if row.status == "none" && now < row.fetched.saturating_add(NONE_TTL_SECS) {
+        } else if row.status == "none" && row.ext_id.as_deref() == Some(key.as_str())
+            && now < row.fetched.saturating_add(NONE_TTL_SECS) {
             return status_only("none");
         }
     }
@@ -96,6 +114,9 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
     let q = Query { title: song.title.clone(), artist: song.artist.clone(), album: song.album.clone(), duration: song.duration };
     let mut failed = false;
     for p in providers {
+        if !keep_going() {
+            return status_only("retry");
+        }
         match p.best(&q) {
             Ok(Some(raw)) => {
                 let parsed = parse_texts(raw.yrc.as_deref(), raw.lrc.as_deref(), raw.plain.as_deref(), raw.trans.as_deref());
@@ -113,7 +134,7 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
     if failed {
         return status_only("retry");
     }
-    let row = LyricRow { status: "none".into(), fetched: now, ..Default::default() };
+    let row = LyricRow { status: "none".into(), ext_id: Some(key), fetched: now, ..Default::default() };
     let _ = lock(db).put_fetched_lyric(&song.id, &row);
     status_only("none")
 }
@@ -153,6 +174,11 @@ mod tests {
     }
 
     fn timed() -> &'static str { "[00:01.00]hello\n[00:02.00]world" }
+
+    /// Most tests do not care about song changes.
+    fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: &[&dyn Provider], now: i64) -> Resolved {
+        super::resolve(db, song, audio, providers, now, &|| true)
+    }
 
     fn song() -> SongRow {
         SongRow { id: "s1".into(), title: "晴天".into(), artist: "周杰伦".into(), album: "B".into(), duration: 200.0,
@@ -342,6 +368,77 @@ mod tests {
         let r = resolve(&db, &song(), None, &[&f], 5);
         assert_eq!((r.status, r.source.as_deref()), ("ok", Some("netease")));
         assert_eq!(f.n(), 0);
+    }
+    #[test] fn song_change_before_first_provider_asks_nobody() {
+        let db = mem();
+        let f = Fake::new("lrclib", Ok(Some(timed())));
+        let r = super::resolve(&db, &song(), None, &[&f], 1, &|| false);
+        assert_eq!(r.status, "retry");
+        assert_eq!(f.n(), 0);
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), None);
+    }
+    #[test] fn song_change_between_providers_stops_and_writes_nothing() {
+        let db = mem();
+        let a = Fake::new("lrclib", Ok(None));
+        let b = Fake::new("netease", Ok(Some(timed())));
+        let r = super::resolve(&db, &song(), None, &[&a, &b], 1, &|| a.n() == 0);
+        assert_eq!(r.status, "retry");
+        assert_eq!((a.n(), b.n()), (1, 0));
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap(), None);
+    }
+    #[test] fn none_row_rechecks_when_netease_is_enabled() {
+        let db = mem();
+        let a = Fake::new("lrclib", Ok(None));
+        assert_eq!(resolve(&db, &song(), None, &[&a], 1000).status, "none");
+        let b = Fake::new("netease", Ok(Some(timed())));
+        let r = resolve(&db, &song(), None, &[&a, &b], 1001);
+        assert_eq!((r.status, r.source.as_deref()), ("ok", Some("netease")));
+        assert_eq!(b.n(), 1);
+    }
+    #[test] fn none_row_rechecks_when_tags_change() {
+        for change in [
+            (|s: &mut SongRow| s.title = "雨天".into()) as fn(&mut SongRow),
+            |s| s.artist = "蔡依林".into(),
+            |s| s.album = "C".into(),
+            |s| s.duration = 201.0,
+        ] {
+            let db = mem();
+            let f = Fake::new("lrclib", Ok(None));
+            resolve(&db, &song(), None, &[&f], 1000);
+            let mut s = song();
+            change(&mut s);
+            resolve(&db, &s, None, &[&f], 1001);
+            assert_eq!(f.n(), 2);
+        }
+    }
+    #[test] fn none_row_stays_cached_under_same_conditions() {
+        let db = mem();
+        let f = Fake::new("lrclib", Ok(None));
+        resolve(&db, &song(), None, &[&f], 1000);
+        let mut s = song();
+        s.title = " 晴天 ".into();
+        s.artist = "周杰伦 ".into();
+        s.duration = 200.3;
+        assert_eq!(resolve(&db, &s, None, &[&f], 1001).status, "none");
+        assert_eq!(f.n(), 1);
+    }
+    #[test] fn none_row_ttl_boundary_is_exact() {
+        let db = mem();
+        let f = Fake::new("lrclib", Ok(None));
+        resolve(&db, &song(), None, &[&f], 1000);
+        resolve(&db, &song(), None, &[&f], 1000 + NONE_TTL_SECS - 1);
+        assert_eq!(f.n(), 1);
+        resolve(&db, &song(), None, &[&f], 1000 + NONE_TTL_SECS);
+        assert_eq!(f.n(), 2);
+    }
+    #[test] fn none_row_without_fingerprint_is_rechecked() {
+        let db = mem();
+        let old = LyricRow { status: "none".into(), fetched: 1000, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &old).unwrap();
+        let f = Fake::new("lrclib", Ok(None));
+        resolve(&db, &song(), None, &[&f], 1001);
+        assert_eq!(f.n(), 1);
+        assert!(db.lock().unwrap().lyric("s1").unwrap().unwrap().ext_id.is_some());
     }
     #[test] fn parsed_of_prefers_yrc_and_merges_trans() {
         let row = LyricRow { status: "ok".into(), yrc: Some("[1000,1000](1000,500,0)你(1500,500,0)好".into()),

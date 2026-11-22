@@ -169,6 +169,19 @@ fn fav_remove(c: &Connection, song_ids: &[String]) -> Result<usize> {
     Ok(n)
 }
 fn norm(s: &str) -> String { s.trim().to_lowercase() }
+/// Moves a lost song's lyric row and offset to its new id. A pinned row or an offset already on the
+/// target stays; a pinned row replaces an unpinned one.
+fn move_lyric_rows(c: &Connection, old: &str, new: &str) -> rusqlite::Result<()> {
+    c.execute(
+        "DELETE FROM lyrics WHERE song_id=?2 AND pinned=0
+         AND EXISTS(SELECT 1 FROM lyrics WHERE song_id=?1 AND pinned=1)", [old, new])?;
+    c.execute("UPDATE OR IGNORE lyrics SET song_id=?2 WHERE song_id=?1", [old, new])?;
+    c.execute("DELETE FROM lyrics WHERE song_id=?1", [old])?;
+    c.execute("UPDATE OR IGNORE lyrics_offset SET song_id=?2 WHERE song_id=?1", [old, new])?;
+    c.execute("DELETE FROM lyrics_offset WHERE song_id=?1", [old])?;
+    Ok(())
+}
+
 /// Library songs indexed by file size, built once per relink pass.
 type SizeIndex = HashMap<u64, Vec<(String, Snapshot)>>;
 fn size_index(c: &Connection) -> Result<SizeIndex> {
@@ -535,11 +548,11 @@ impl Db {
             let v = st.query_map([], |r| Ok((r.get(0)?, snap_of(r, 1)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
             v
         };
-        let items: Vec<(i64, i64, Snapshot)> = {
+        let items: Vec<(i64, i64, Snapshot, String)> = {
             let mut st = tx.prepare(
                 "SELECT id, playlist_id, title, artist, album, duration, size, song_id FROM playlist_items
                  WHERE song_id NOT IN (SELECT id FROM songs) ORDER BY id")?;
-            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, snap_of(r, 2)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, snap_of(r, 2)?, r.get(7)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
             v
         };
         if favs.is_empty() && items.is_empty() { return Ok(0); }
@@ -551,10 +564,12 @@ impl Db {
                  SELECT ?2,?3,?4,?5,?6,?7,added FROM favorites WHERE song_id=?1",
                 params![old, new, ns.title, ns.artist, ns.album, ns.duration, ns.size as i64])?;
             tx.execute("DELETE FROM favorites WHERE song_id=?1", [&old])?;
+            move_lyric_rows(&tx, &old, &new)?;
             n += 1;
         }
-        for (item, pl, sn) in items {
+        for (item, pl, sn, old) in items {
             let Some((new, ns)) = unique_candidate(&idx, &sn) else { continue };
+            move_lyric_rows(&tx, &old, &new)?;
             let exists: i64 = tx.query_row(
                 "SELECT count(*) FROM playlist_items WHERE playlist_id=?1 AND song_id=?2", params![pl, new], |r| r.get(0))?;
             if exists > 0 {
@@ -866,6 +881,55 @@ mod tests {
         assert_eq!(f.len(), 1); assert_eq!(f[0].song_id, a2); assert_eq!(f[0].snap.artist, "THE BEATLES ");
         assert_eq!(f[0].added, 3);
         assert_eq!(db.relink_missing().unwrap(), 0);
+    }
+    fn pinned(text: &str) -> LyricRow {
+        LyricRow { status: "ok".into(), source: Some("manual".into()), lrc: Some(text.into()), pinned: true, fetched: 1, ..Default::default() }
+    }
+    #[test] fn relink_moves_lyrics_and_offset() {
+        let mut db = Db::open_in_memory().unwrap();
+        let (a, _pl) = relink_setup(&mut db);
+        db.put_lyric(&a, &pinned("[00:01.00]mine")).unwrap();
+        db.set_lyric_offset(&a, -500).unwrap();
+        let a2 = mk(&mut db, "new/a.mp3", "Yesterday", "The Beatles", 500, 100.0);
+        db.relink_missing().unwrap();
+        assert_eq!(db.lyric(&a2).unwrap(), Some(pinned("[00:01.00]mine")));
+        assert_eq!(db.lyric_offset(&a2).unwrap(), -500);
+        assert_eq!(db.lyric(&a).unwrap(), None);
+        let left: i64 = db.conn.query_row("SELECT count(*) FROM lyrics_offset WHERE song_id=?1", [&a], |r| r.get(0)).unwrap();
+        assert_eq!(left, 0);
+    }
+    #[test] fn relink_keeps_pinned_row_and_offset_on_target() {
+        let mut db = Db::open_in_memory().unwrap();
+        let (a, _pl) = relink_setup(&mut db);
+        db.put_lyric(&a, &pinned("[00:01.00]old")).unwrap();
+        db.set_lyric_offset(&a, -500).unwrap();
+        let a2 = mk(&mut db, "new/a.mp3", "Yesterday", "The Beatles", 500, 100.0);
+        db.put_lyric(&a2, &pinned("[00:02.00]target")).unwrap();
+        db.set_lyric_offset(&a2, 700).unwrap();
+        db.relink_missing().unwrap();
+        assert_eq!(db.lyric(&a2).unwrap().unwrap().lrc.as_deref(), Some("[00:02.00]target"));
+        assert_eq!(db.lyric_offset(&a2).unwrap(), 700);
+        assert_eq!(db.lyric(&a).unwrap(), None);
+    }
+    #[test] fn relink_pinned_replaces_unpinned_target() {
+        let mut db = Db::open_in_memory().unwrap();
+        let (a, _pl) = relink_setup(&mut db);
+        db.put_lyric(&a, &pinned("[00:01.00]mine")).unwrap();
+        let a2 = mk(&mut db, "new/a.mp3", "Yesterday", "The Beatles", 500, 100.0);
+        db.put_lyric(&a2, &LyricRow { status: "none".into(), fetched: 9, ..Default::default() }).unwrap();
+        db.relink_missing().unwrap();
+        assert_eq!(db.lyric(&a2).unwrap(), Some(pinned("[00:01.00]mine")));
+    }
+    #[test] fn relink_unpinned_does_not_replace_target() {
+        let mut db = Db::open_in_memory().unwrap();
+        let (a, _pl) = relink_setup(&mut db);
+        db.put_lyric(&a, &LyricRow { status: "none".into(), fetched: 9, ..Default::default() }).unwrap();
+        let a2 = mk(&mut db, "new/a.mp3", "Yesterday", "The Beatles", 500, 100.0);
+        let keep = LyricRow { status: "ok".into(), source: Some("lrclib".into()), lrc: Some("[00:03.00]x".into()), fetched: 2, ..Default::default() };
+        db.put_lyric(&a2, &keep).unwrap();
+        db.relink_missing().unwrap();
+        assert_eq!(db.lyric(&a2).unwrap(), Some(keep));
+        assert_eq!(db.lyric(&a).unwrap(), None);
     }
     #[test] fn relink_skips_ambiguous() {
         let mut db = Db::open_in_memory().unwrap();

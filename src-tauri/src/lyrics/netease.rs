@@ -1,5 +1,5 @@
 //! NetEase Cloud Music provider. Everything NetEase-specific lives in this file.
-use super::online::{http_get, http_post_form, pick_best, Candidate, NetError, Provider, Query, Raw};
+use super::online::{has_artist, http_get, http_post_form, pick_best, Candidate, NetError, Provider, Query, Raw};
 use serde_json::Value;
 
 const HEADERS: [(&str, &str); 2] = [("User-Agent", "Mozilla/5.0"), ("Referer", "https://music.163.com/")];
@@ -92,6 +92,9 @@ impl Provider for Netease {
     }
 
     fn best(&self, q: &Query) -> Result<Option<Raw>, NetError> {
+        if !has_artist(q) {
+            return Ok(None);
+        }
         let cands = self.search(q)?;
         match pick_best(&cands, q) {
             Some(c) => self.fetch(&c.ext_id),
@@ -159,6 +162,12 @@ mod tests {
         assert!(search_shape_ok(r#"{"code":200,"result":{}}"#));
         assert!(search_shape_ok(r#"{"code":200,"result":{"songs":[]}}"#));
         assert!(search_shape_ok(r#"{"code":200,"result":{"songCount":0}}"#));
+    }
+
+    #[test]
+    fn best_without_artist_makes_no_request() {
+        let q = Query { title: "A".into(), artist: " ".into(), album: String::new(), duration: 100.0 };
+        assert_eq!(Netease.best(&q), Ok(None));
     }
 
     #[test]

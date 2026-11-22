@@ -134,6 +134,10 @@ impl Player {
             inner: Mutex::new(Inner::new(queue, volume)),
         }
     }
+    /// The song the player is on (the id the UI sees).
+    pub fn current_id(&self) -> Option<String> {
+        self.inner().id.clone()
+    }
     fn inner(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }

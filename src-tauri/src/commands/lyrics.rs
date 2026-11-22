@@ -1,12 +1,12 @@
-//! Lyrics commands. Network and file IO never run under the db lock; commands are `async`
-//! so they stay off the main thread. Logic lives in plain functions for testing.
+//! Lyrics commands. Network and file IO never run under the db lock, and run on the blocking
+//! pool so a slow lookup cannot starve the async workers. Logic lives in plain functions for testing.
 
 use std::io::Read;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::db::{Db, LyricRow, SongRow};
 use crate::lyrics::online::{Candidate, Provider, Query};
@@ -81,11 +81,13 @@ fn require_song(db: &Db, id: &str) -> Result<SongRow, String> {
 }
 
 fn query_of(song: &SongRow, title: Option<String>, artist: Option<String>) -> Query {
-    let pick = |o: Option<String>, d: &str| o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| d.to_string());
+    // None: use the tag. A field the user cleared stays blank.
+    let pick = |o: Option<String>, d: &str| o.map_or_else(|| d.to_string(), |s| s.trim().to_string());
     Query { title: pick(title, &song.title), artist: pick(artist, &song.artist), album: song.album.clone(), duration: song.duration }
 }
 
 pub fn search_with(providers: &[&dyn Provider], q: &Query) -> Result<Vec<Candidate>, String> {
+    if q.title.trim().is_empty() && q.artist.trim().is_empty() { return Ok(Vec::new()); }
     let mut out = Vec::new();
     let mut failed = 0;
     for p in providers {
@@ -134,46 +136,62 @@ fn pinned_dto(db: &Db, id: &str, row: &LyricRow) -> Result<LyricsDto, String> {
     Ok(dto_of(id, r, offset))
 }
 
-#[tauri::command(async)]
-pub fn lyrics_get(id: String, state: State<'_, AppState>) -> Result<LyricsDto, String> {
-    let (song, audio) = locate(&state, &id)?;
-    let names = provider_names(read_settings(&state.db()).netease);
-    let boxed = providers_for(&names);
-    let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
-    let r = resolve(&state.db, &song, audio.as_deref(), &refs, now());
-    let offset = state.db().lyric_offset(&id).unwrap_or(0);
-    Ok(dto_of(&id, r, offset))
+/// Runs blocking lyric work (HTTP, NAS reads) on the blocking pool.
+async fn off_thread<T: Send + 'static>(app: AppHandle, f: impl FnOnce(&AppState) -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || f(app.state::<AppState>().inner()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-#[tauri::command(async)]
-pub fn lyrics_search(id: String, title: Option<String>, artist: Option<String>, state: State<'_, AppState>) -> Result<Vec<Candidate>, String> {
-    let (song, names) = {
-        let db = state.db();
-        (require_song(&db, &id)?, provider_names(read_settings(&db).netease))
-    };
-    let boxed = providers_for(&names);
-    let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
-    search_with(&refs, &query_of(&song, title, artist))
+#[tauri::command]
+pub async fn lyrics_get(id: String, app: AppHandle) -> Result<LyricsDto, String> {
+    off_thread(app, move |state| {
+        let (song, audio) = locate(state, &id)?;
+        let names = provider_names(read_settings(&state.db()).netease);
+        let boxed = providers_for(&names);
+        let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
+        let still_current = || state.player.current_id().as_deref() == Some(id.as_str());
+        let r = resolve(&state.db, &song, audio.as_deref(), &refs, now(), &still_current);
+        let offset = state.db().lyric_offset(&id).unwrap_or(0);
+        Ok(dto_of(&id, r, offset))
+    }).await
 }
 
-#[tauri::command(async)]
-pub fn lyrics_choose(id: String, source: String, ext_id: String, state: State<'_, AppState>) -> Result<LyricsDto, String> {
-    let names = {
-        let db = state.db();
-        require_song(&db, &id)?;
-        provider_names(read_settings(&db).netease)
-    };
-    let boxed = providers_for(&names);
-    let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
-    let row = fetch_pinned(&refs, &source, &ext_id, now())?;
-    pinned_dto(&state.db(), &id, &row)
+#[tauri::command]
+pub async fn lyrics_search(id: String, title: Option<String>, artist: Option<String>, app: AppHandle) -> Result<Vec<Candidate>, String> {
+    off_thread(app, move |state| {
+        let (song, names) = {
+            let db = state.db();
+            (require_song(&db, &id)?, provider_names(read_settings(&db).netease))
+        };
+        let boxed = providers_for(&names);
+        let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
+        search_with(&refs, &query_of(&song, title, artist))
+    }).await
 }
 
-#[tauri::command(async)]
-pub fn lyrics_use_file(id: String, path: String, state: State<'_, AppState>) -> Result<LyricsDto, String> {
-    require_song(&state.db(), &id)?;
-    let row = row_from_file(Path::new(&path), now())?;
-    pinned_dto(&state.db(), &id, &row)
+#[tauri::command]
+pub async fn lyrics_choose(id: String, source: String, ext_id: String, app: AppHandle) -> Result<LyricsDto, String> {
+    off_thread(app, move |state| {
+        let names = {
+            let db = state.db();
+            require_song(&db, &id)?;
+            provider_names(read_settings(&db).netease)
+        };
+        let boxed = providers_for(&names);
+        let refs: Vec<&dyn Provider> = boxed.iter().map(|b| b.as_ref()).collect();
+        let row = fetch_pinned(&refs, &source, &ext_id, now())?;
+        pinned_dto(&state.db(), &id, &row)
+    }).await
+}
+
+#[tauri::command]
+pub async fn lyrics_use_file(id: String, path: String, app: AppHandle) -> Result<LyricsDto, String> {
+    off_thread(app, move |state| {
+        require_song(&state.db(), &id)?;
+        let row = row_from_file(Path::new(&path), now())?;
+        pinned_dto(&state.db(), &id, &row)
+    }).await
 }
 
 #[tauri::command(async)]
@@ -195,17 +213,21 @@ pub fn lyrics_set_settings(netease: bool, trans: bool, state: State<'_, AppState
     let _ = db.set_setting("lyrics_trans", if trans { "true" } else { "false" });
 }
 
-#[tauri::command(async)]
-pub fn cover_color(id: String, state: State<'_, AppState>) -> Option<[u8; 3]> {
+fn cover_color_of(state: &AppState, id: &str) -> Option<[u8; 3]> {
     let (song, root_path) = {
         let db = state.db();
-        let song = db.song(&id).ok().flatten()?;
+        let song = db.song(id).ok().flatten()?;
         let root = db.roots().ok()?.into_iter().find(|r| r.id == song.root_id)?;
         (song, root.path)
     };
     let online = state.is_online(song.root_id);
     let jpg = crate::cover::cached_cover(&state.data_dir, &root_path, &song, online)?;
     crate::cover::dominant_color(&jpg)
+}
+
+#[tauri::command]
+pub async fn cover_color(id: String, app: AppHandle) -> Option<[u8; 3]> {
+    off_thread(app, move |state| Ok(cover_color_of(state, &id))).await.ok().flatten()
 }
 
 #[cfg(test)]
@@ -256,6 +278,20 @@ mod tests {
         assert_eq!(search_with(&[&bad, &b], &q()).unwrap().len(), 1);
         let bad2 = fake("netease", Err(()), Ok(None));
         assert_eq!(search_with(&[&bad, &bad2], &q()), Err("lyrics.netError".into()));
+    }
+    #[test] fn cleared_search_field_stays_blank() {
+        let song = SongRow { id: "s1".into(), title: "晴天".into(), artist: "周杰伦".into(), album: "B".into(), duration: 200.0,
+            root_id: 1, file_id: 1, rel: "a.mp3".into(), ext: "mp3".into(), codec: "mp3".into(), bitrate: 0, size: 0,
+            cover: 0, track: 1, start_ms: 0, end_ms: None, mtime: 0, added: None };
+        let a = query_of(&song, Some("雨天".into()), Some("  ".into()));
+        assert_eq!((a.title.as_str(), a.artist.as_str()), ("雨天", ""));
+        let b = query_of(&song, None, None);
+        assert_eq!((b.title.as_str(), b.artist.as_str()), ("晴天", "周杰伦"));
+    }
+    #[test] fn search_with_nothing_to_search_asks_nobody() {
+        let bad = fake("lrclib", Err(()), Ok(None));
+        let blank = Query { title: " ".into(), artist: "".into(), album: "".into(), duration: 1.0 };
+        assert_eq!(search_with(&[&bad], &blank), Ok(vec![]));
     }
     #[test] fn choose_errors_and_pins() {
         let ok = fake("lrclib", Ok(0), Ok(Some("[00:01.00]hi")));
