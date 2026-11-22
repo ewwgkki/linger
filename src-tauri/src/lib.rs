@@ -49,6 +49,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app::set_app_title,
             commands::library::get_library,
             commands::library::add_roots,
             commands::library::remove_root,

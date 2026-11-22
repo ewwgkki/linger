@@ -1,5 +1,5 @@
 // App shell: boot, sidebar, routing between views, history navigation.
-import { initI18n, applyI18n, t, lang } from './i18n.js';
+import { initI18n, applyI18n, t, lang, onLanguage } from './i18n.js';
 import { api, isMock } from './api.js';
 import { esc, playable, icon } from './util.js';
 import { info } from './library.js';
@@ -13,7 +13,7 @@ import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, dele
 import { askName, confirmBox } from './dialogs.js';
 import { createSelection, clickSelect, selectAll, selectedInOrder, pruneSelection, clearSelection } from './selection.js';
 import { openSongMenu, openFolderMenu, closeMenus, menuOpen, playIds, queueIds, removeIds, savableIds } from './menu.js';
-import { saveSongs, pickerOpen } from './savepicker.js';
+import { saveSongs, pickerOpen, closePicker } from './savepicker.js';
 import { initQueue } from './queue.js';
 import { initLyrics } from './lyrics.js';
 import { initLyricsPanel } from './lyricspanel.js';
@@ -73,6 +73,19 @@ export const ctx = {
 
 // Covers that fail to load fall back to the symbol icon underneath (no inline handlers under the CSP).
 document.addEventListener('error', (e) => { if (e.target.tagName === 'IMG' && e.target.closest('.art')) e.target.remove(); }, true);
+
+// ---------- language ----------
+function syncTitle() {
+  document.title = lang() === 'zh-CN' ? 'Linger \u00b7 \u4f59\u97f3' : 'Linger';
+  api.invoke('set_app_title', { lang: lang() }).catch((e) => console.error('set_app_title', e));
+}
+onLanguage(() => {
+  closeMenus();
+  closePicker();
+  syncTitle();
+  sidebar();
+  render();
+});
 
 // ---------- library ----------
 async function loadLibrary() {
@@ -476,6 +489,7 @@ async function boot() {
   if (isMock && ['light', 'dark'].includes(qs.get('theme'))) document.documentElement.dataset.theme = qs.get('theme');
   await initI18n(isMock ? qs.get('lang') || undefined : undefined);
   applyI18n();
+  syncTitle();
   state.shelfSort = store.get('shelfSort', 'count');
   const h = fromHash();
   state.tab = h.tab; state.pl = h.pl;

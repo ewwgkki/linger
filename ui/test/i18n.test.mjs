@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { t, setMessages, detectLang, lang } from '../js/i18n.js';
+import { t, setMessages, detectLang, lang, setLanguage, onLanguage } from '../js/i18n.js';
 
 const ui = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (l) => JSON.parse(readFileSync(join(ui, 'i18n', `${l}.json`), 'utf8'));
@@ -122,4 +122,50 @@ test('every literal t() key used in ui/js exists', () => {
     }
   }
   assert.ok(n > 50, `found ${n} uses`);
+});
+
+test('English count strings read correctly for one', () => {
+  const en = load('en');
+  for (const [k, v] of Object.entries(en)) {
+    assert.ok(!/\(s\)/.test(v), `${k}: ${v}`);
+    if (k.endsWith('_one') || !v.includes('{n}') || !/\{n\}[^.]*?\b(songs|albums|artists|folders|files|playlists)\b/.test(v)) continue;
+    assert.ok(k + '_one' in en, `${k} needs a singular`);
+    assert.ok(!/\b(songs|albums|artists|folders|files|playlists)\b/.test(en[k + '_one'].split('{n}')[1].split(/[,.·]/)[0]), `${k}_one`);
+  }
+});
+
+test('switching language installs the words before listeners run and saves nothing on failure', async () => {
+  setMessages('zh-CN', { k: 'zh' });
+  const seen = [];
+  const off = onLanguage((l) => seen.push([l, t('k')]));
+  assert.equal(await setLanguage('fr', async () => ({ k: 'fr' })), false);
+  await assert.rejects(setLanguage('en', async () => { throw new Error('x'); }));
+  assert.equal(lang(), 'zh-CN');
+  assert.equal(await setLanguage('en', async () => ({ k: 'en' })), true);
+  assert.deepEqual(seen, [['en', 'en']]);
+  assert.equal(await setLanguage('en', async () => ({ k: 'again' })), false, 'already current');
+  off();
+  setMessages('zh-CN', load('zh-CN'));
+});
+
+test('a slower earlier switch cannot override a later one', async () => {
+  setMessages('zh-CN', { k: 'zh' });
+  let release;
+  const slow = setLanguage('en', () => new Promise((r) => { release = r; }));
+  assert.equal(await setLanguage('zh-CN', async () => ({ k: 'zh2' })), false, 'already current');
+  release({ k: 'en' });
+  assert.equal(await slow, false);
+  assert.equal(lang(), 'zh-CN');
+  setMessages('zh-CN', load('zh-CN'));
+});
+
+test('one failing listener does not stop the others', async () => {
+  setMessages('zh-CN', { k: 'zh' });
+  let ran = false;
+  const realError = console.error; console.error = () => {};
+  const a = onLanguage(() => { throw new Error('x'); }), b = onLanguage(() => { ran = true; });
+  await setLanguage('en', async () => ({ k: 'en' }));
+  console.error = realError; a(); b();
+  assert.ok(ran);
+  setMessages('zh-CN', load('zh-CN'));
 });

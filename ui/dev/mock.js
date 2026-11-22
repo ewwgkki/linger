@@ -317,6 +317,7 @@ export function createMock() {
       lib.roots = lib.roots.filter((r) => r.id !== id);
       return lib.roots.map((r) => ({ ...r }));
     },
+    set_app_title: () => {},
     start_scan: ({ root = null } = {}) => {
       globalThis.__lastScanRoot = root;
       emit('library://roots', lib.roots.map((r) => ({ ...r })));

@@ -1,5 +1,5 @@
 // Settings dialog (music folders, scan, FFmpeg), scan progress and the toast.
-import { t, lang } from './i18n.js';
+import { t, lang, onLanguage, setLanguage, LANGS, LANG_NAMES } from './i18n.js';
 import { api } from './api.js';
 import { rootLabel } from './views/songs.js';
 import { esc, icon, applyOnline } from './util.js';
@@ -69,6 +69,30 @@ function scanInfo() {
   $('scaninfo').textContent = scanned_at
     ? t('scan.lastInfo', { time: new Date(scanned_at * 1000).toLocaleString(lang()), n: songs.length })
     : t('scan.never');
+}
+
+let lastSkipped = [];
+function paintSkips() {
+  $('skipsum').textContent = t('scan.skippedTitle', { n: lastSkipped.length });
+  $('skips').innerHTML = lastSkipped.map((x) => `<li>${esc(x.path)} &mdash; ${esc(t(x.why))}</li>`).join('');
+}
+
+function paintLanguages() {
+  $('langseg').innerHTML = LANGS.map((l) => `<button type="button" data-lang="${l}" lang="${l}" aria-pressed="${l === lang()}">${esc(LANG_NAMES[l])}</button>`).join('');
+}
+
+function languageChanged() {
+  paintLanguages();
+  renderRoots();
+  scanInfo();
+  ffmpegInfo();
+  $('rootsmsg').textContent = '';
+  $('importmsg').textContent = '';
+  if (lastSkipped.length) paintSkips();
+  if (!scan.running) { // while scanning, the next progress event rewrites these
+    $('scanmsg').textContent = '';
+    hideToast();
+  }
 }
 
 function ffmpegInfo() {
@@ -220,6 +244,7 @@ function beginScan(user) {
     scan.toast = false;
     scan.before = ctx.loaded ? new Set(ctx.lib.songs.map((s) => s.id)) : null;
     $('skipbox').hidden = true;
+    lastSkipped = [];
     scanUI(true);
   }
   scan.user = scan.user || user;
@@ -285,8 +310,8 @@ async function onFinished({ count, skipped = [], root = null }) {
   $('scanprog').firstElementChild.style.width = '100%';
   if (skipped.length) {
     $('skipbox').hidden = false;
-    $('skipsum').textContent = t('scan.skippedTitle', { n: skipped.length });
-    $('skips').innerHTML = skipped.map((x) => `<li>${esc(x.path)} &mdash; ${esc(t(x.why))}</li>`).join('');
+    lastSkipped = skipped;
+    paintSkips();
   }
   if (!(wasUser || shown || changed)) return;
   if (skipped.length) {
@@ -310,6 +335,12 @@ export function initSettings(c, { loadLibrary }) {
   ctx = c;
   reload = loadLibrary;
   $('toastx').onclick = hideToast;
+  paintLanguages();
+  onLanguage(languageChanged);
+  $('langseg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-lang]');
+    if (b) setLanguage(b.dataset.lang).catch(() => toast(t('settings.langError'), { icon: 'x', autoHide: 6000 }));
+  });
   // A modal blocks the whole page: clicking the dimmed area outside it closes it.
   const box = $('settings');
   const outside = (e) => {

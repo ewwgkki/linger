@@ -1,6 +1,6 @@
 // Player bar. The queue and playback live in the backend; this module only mirrors
 // `player://state` / `player://pos` and sends commands.
-import { t } from './i18n.js';
+import { t, onLanguage } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss, trackSlider } from './util.js';
 import { art, badges, artistName } from './views/songs.js';
@@ -35,7 +35,11 @@ export function sourceLabel() {
   if (!source) return '';
   if (source.tab === 'fav') return t('fav.title');
   if (source.tab === 'pl') { const p = pl.list.find((x) => x.id === source.pl); return p ? p.name : source.label || ''; }
-  return source.label || '';
+  if (source.album != null) return source.album;
+  if (source.artist != null) return artistName(source.artist);
+  if (source.root != null) return source.label || ''; // the folder's own name
+  if (source.quality) return t('q.' + source.quality);
+  return t(source.q && source.q.trim() ? 'hero.search' : 'hero.allSongs');
 }
 
 /** Forget the source (playback started some other way, e.g. adding to an empty queue). */
@@ -216,6 +220,12 @@ export function initPlayer(c) {
     e.stopPropagation(); // Space here activates this control instead of play/pause
     reveal();
   };
+  onLanguage(() => {
+    hideError();
+    applyState({});
+    renderNow();
+    showSaved();
+  });
   $('playpause').onclick = toggle;
   $('plsave').onclick = () => { if (songById(ps.id)) saveSongs([ps.id], $('plsave'), ctx); };
   $('queuebtn').onclick = () => toggleQueue();

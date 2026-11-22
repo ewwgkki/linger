@@ -1,6 +1,7 @@
 // Pure library queries (no DOM). state: { q, artist, album, quality, root, sort:{col,dir}, shelfSort }.
 // artist '' means "unknown artist"; null means no filter.
 import { norm, quality } from './util.js';
+import { lang } from './i18n.js';
 
 const LAST = '￿';
 const cache = new WeakMap();
@@ -73,7 +74,7 @@ export function groupShelf(songs, kind, state) {
     g.songs.push(s);
   }
   const list = [...groups.values()].filter((g) => !q || norm(g.name).includes(q) || g.songs.some((s) => info(s).key.includes(q)));
-  const byName = (a, b) => a.name.localeCompare(b.name, 'zh');
+  const byName = (a, b) => a.name.localeCompare(b.name, lang());
   list.sort(state.shelfSort === 'name' ? byName : (a, b) => b.songs.length - a.songs.length || byName(a, b));
   return list;
 }

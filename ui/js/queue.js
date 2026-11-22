@@ -1,7 +1,7 @@
 // Play queue panel: a drawer on the right with the playing song, the user queue ("up") and the
 // rest of the play source ("ctx"). The backend owns the queue; this module mirrors
 // `player_queue` while the panel is open and sends edits (optimistically re-rendered).
-import { t } from './i18n.js';
+import { t, onLanguage } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss, icon } from './util.js';
 import { art, artistName, gripHtml } from './views/songs.js';
@@ -152,6 +152,7 @@ const rowOf = (el) => {
 };
 
 export function initQueue(c) {
+  onLanguage(() => { if (queueOpen()) render(); });
   ctx = c;
   $('queueclose').onclick = closeQueue;
   const body = $('qbody');

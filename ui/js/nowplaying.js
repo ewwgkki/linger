@@ -1,7 +1,7 @@
 // Full-screen play page: spinning record on the left, lyrics on the right, backdrop from the cover
 // colour. It sits under the player bar, so the transport stays usable. Opening it hides the lyrics or
 // queue drawer and closing it brings that drawer back, so only one lyrics view ever drives frames.
-import { t } from './i18n.js';
+import { t, onLanguage } from './i18n.js';
 import { api } from './api.js';
 import { ly, subscribe, isPlaying, onClock } from './lyrics.js';
 import { backdropColors } from './lyricsmodel.js';
@@ -152,6 +152,12 @@ export function initNowPlaying(c) {
   $('plcover').onclick = toggleNowPlaying;
   $('npbtn').onclick = toggleNowPlaying;
   $('nplclose').onclick = closeNowPlaying;
+  onLanguage(() => {
+    const k = isOpen ? 'np.close' : 'np.open';
+    $('plcover').setAttribute('aria-label', t(k));
+    $('plcover').title = t(k);
+    if (isOpen) paintSong();
+  });
 
   // the page is not a scroll container: a wheel outside the lyrics must not scroll the list behind it
   $('nowplaying').addEventListener('wheel', (e) => { if (!e.target.closest('.ly-scroll')) e.preventDefault(); }, { passive: false });

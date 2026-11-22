@@ -25,7 +25,8 @@
   "top.refresh": "更新曲库",
   "top.refreshTip": "重新扫描音乐文件夹，加入新歌、去掉已删除的歌",
   "top.folders": "音乐文件夹",
-  "top.foldersTip": "添加或移除音乐文件夹",
+  "top.settings": "设置",
+  "top.settingsTip": "语言和音乐文件夹",
 
   "q.lossless": "无损",
   "q.high": "高品质 ≥256k",
@@ -122,7 +123,9 @@
   "skip.unreadable": "无法读取",
   "skip.dberror": "写入曲库出错",
 
-  "settings.title": "音乐文件夹",
+  "settings.language": "语言",
+  "settings.langError": "无法切换语言",
+  "settings.title": "设置",
   "settings.intro": "余音会扫描下面这些文件夹（包括里面的子文件夹）里的所有歌曲。",
   "settings.addFolder": "添加文件夹",
   "settings.scan": "扫描",

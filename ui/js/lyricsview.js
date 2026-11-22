@@ -2,7 +2,7 @@
 // and tools around it. The main-window drawer and the full-screen page each own one instance; an
 // instance does work only between show() and hide(), so only the visible one drives frames. Each frame
 // touches only the current line's CSS variables, so long lyrics cost no layout.
-import { t } from './i18n.js';
+import { t, onLanguage } from './i18n.js';
 import { esc, icon } from './util.js';
 import { ly, subscribe, holdView, reload, nowMs, isPlaying, onClock, setOffset, setTrans } from './lyrics.js';
 import { lineIndex, wordFill, lineFill, seekTarget, scrollGate } from './lyricsmodel.js';
@@ -235,6 +235,8 @@ export function createLyricsView(prefix, { onRender } = {}) {
   subscribe(render);
   onClock(kick);
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopFrames(); else kick(); });
+
+  onLanguage(() => { if (on) render(); });
 
   return {
     /** Call after the container is visible, so the first centring has its real size. */

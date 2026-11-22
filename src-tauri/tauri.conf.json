@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Linger · 余音",
+        "title": "Linger",
         "width": 1200,
         "height": 780,
         "minWidth": 860,
