@@ -1,5 +1,5 @@
 // App shell: boot, sidebar, routing between views, history navigation.
-import { initI18n, applyI18n, t, lang, onLanguage } from './i18n.js';
+import { initI18n, applyI18n, rememberLanguage, t, lang, onLanguage } from './i18n.js';
 import { api, isMock } from './api.js';
 import { esc, playable, icon } from './util.js';
 import { info } from './library.js';
@@ -508,7 +508,10 @@ function fromHash() {
 async function boot() {
   const qs = new URLSearchParams(location.search);
   if (isMock && ['light', 'dark'].includes(qs.get('theme'))) document.documentElement.dataset.theme = qs.get('theme');
-  await initI18n(isMock ? qs.get('lang') || undefined : undefined);
+  // a language picked in the installer wins once, then Settings is in charge again
+  const installed = isMock ? null : await api.invoke('take_installer_language').catch(() => null);
+  if (installed) rememberLanguage(installed);
+  await initI18n(isMock ? qs.get('lang') || undefined : installed || undefined);
   applyI18n();
   syncTitle();
   state.shelfSort = store.get('shelfSort', 'count');

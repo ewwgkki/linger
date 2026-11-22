@@ -318,6 +318,7 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    take_installer_language: () => null,
     export_playlist: ({ id }) => {
       const items = id == null ? fav : findList(id).items;
       globalThis.__lastExport = id;

@@ -35,7 +35,7 @@ Run the installer and choose a folder. No administrator rights are needed, and W
 - Synced karaoke-style lyrics and a full-screen play page / 卡拉 OK 式滚动歌词和全屏播放页
 - Lyrics from embedded tags, `.lrc` files, LRCLIB and NetEase / 歌词来自内嵌标签、`.lrc`、LRCLIB 和网易云
 - Keeps playing in the system tray when the window is closed / 关闭窗口后在系统托盘继续播放
-- English and Simplified Chinese, switchable in Settings / 支持英文和简体中文，可在设置中切换
+- English and Simplified Chinese: choose during installation or in Settings / 支持英文和简体中文，可在安装时或设置中选择
 - No ads, no accounts, and your music files are never modified / 无广告、无需账号、绝不修改音乐文件
 
 Online lyric lookups send only the song title, artist, album and duration. NetEase can be turned off in settings.

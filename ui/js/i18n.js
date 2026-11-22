@@ -39,6 +39,12 @@ function savedLang() {
   return null;
 }
 
+/** Makes `l` the saved language, as if it had been picked in Settings. */
+export function rememberLanguage(l) {
+  if (!LANGS.includes(l)) return;
+  try { localStorage.setItem(LANG_KEY, l); } catch (_) { /* storage unavailable */ }
+}
+
 const loadDict = async (l) => {
   const res = await fetch(new URL(`../i18n/${l}.json`, import.meta.url));
   if (!res.ok) throw new Error(`language file ${l}: ${res.status}`);

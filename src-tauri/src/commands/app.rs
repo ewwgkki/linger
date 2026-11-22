@@ -1,6 +1,28 @@
 //! Window-level commands.
 
-use tauri::Manager;
+use tauri::{Manager, State};
+
+use crate::state::AppState;
+
+/// Written by the installer, read once by the app.
+const INSTALL_LANGUAGE_FILE: &str = "install-language";
+
+fn parse_install_language(text: &str) -> Option<&'static str> {
+    match text.trim() {
+        "zh-CN" => Some("zh-CN"),
+        "en" => Some("en"),
+        _ => None,
+    }
+}
+
+/// The language picked in the installer, if this is the first start since then.
+#[tauri::command(async)]
+pub fn take_installer_language(state: State<'_, AppState>) -> Option<String> {
+    let path = state.data_dir.join(INSTALL_LANGUAGE_FILE);
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    parse_install_language(&text).map(str::to_string)
+}
 
 /// Window title for an interface language.
 pub fn app_title(lang: &str) -> &'static str {
@@ -16,6 +38,14 @@ pub fn set_app_title(lang: String, window: tauri::Window) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installer_language_is_validated() {
+        assert_eq!(parse_install_language("zh-CN"), Some("zh-CN"));
+        assert_eq!(parse_install_language(" en\r\n"), Some("en"));
+        assert_eq!(parse_install_language("fr"), None);
+        assert_eq!(parse_install_language(""), None);
+    }
 
     #[test]
     fn title_follows_language() {

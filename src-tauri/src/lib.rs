@@ -57,6 +57,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::set_app_title,
+            commands::app::take_installer_language,
             tray::window_settings,
             tray::window_set_close_to_tray,
             commands::library::get_library,
