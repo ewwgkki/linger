@@ -98,7 +98,7 @@ export function renderLines(el, data, opts = {}) {
 }
 
 /**
- * Binds a view to the elements `<prefix>state`, `statemsg`, `stateicon`, `statebtn`, `lines`, `tools`,
+ * Binds a view to the elements `<prefix>state`, `statemsg`, `stateicon`, `statebtn`, `statesearch`, `lines`, `tools`,
  * `offsetbox`, `offset`, `earlier`, `later`, `trans`, `src` and `search`. `onRender` runs on every
  * store change while shown. Returns `{ show, hide, shown }`.
  */
@@ -162,6 +162,8 @@ export function createLyricsView(prefix, { onRender } = {}) {
     $('statemsg').textContent = t({ idle: 'lyrics.noSong', loading: 'lyrics.loading', none: 'lyrics.none', retry: 'lyrics.retry' }[kind]);
     $('statebtn').hidden = !action;
     if (action) $('statebtn').textContent = t(action);
+    $('statesearch').hidden = kind !== 'retry'; // offline: a manual search or local file still works
+    $('statesearch').textContent = t('lyrics.search');
   }
 
   function clearLines() {
@@ -210,6 +212,7 @@ export function createLyricsView(prefix, { onRender } = {}) {
     if ($('state').dataset.kind === 'retry') reload();
     else openLyricSearch();
   };
+  $('statesearch').onclick = () => openLyricSearch();
   $('earlier').onclick = () => setOffset(OFFSET_STEP);
   $('later').onclick = () => setOffset(-OFFSET_STEP);
   $('trans').onclick = () => setTrans(!ly.trans).catch((e) => {

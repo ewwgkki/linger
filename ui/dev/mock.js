@@ -80,7 +80,7 @@ function lyricsCommands(lib) {
     lyrics_search: ({ id, title, artist }) => {
       if (title === 'offline') throw 'lyrics.netError';
       const s = lib.songs[index.get(id) ?? 0] || {};
-      const t = title || s.t || 'Untitled', a = artist || s.a || 'Unknown';
+      const t = title ?? (s.t || 'Untitled'), a = artist ?? (s.a || 'Unknown'); // blank stays blank, as in the backend
       return [
         { source: 'netease', ext_id: '1001', title: t, artist: a, album: s.b || '', dur: s.s || 200, synced: true },
         { source: 'netease', ext_id: '1002', title: t + ' (Live)', artist: a, album: 'Live', dur: (s.s || 200) + 12, synced: true },

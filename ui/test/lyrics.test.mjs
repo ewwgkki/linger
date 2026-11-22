@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill, pickStillValid, backdropColors } from '../js/lyricsmodel.js';
+import { lineIndex, wordProgress, wordFill, clock, latest, STALE, seekTarget, scrollGate, lineFill, pickStillValid, backdropColors, searchArgs } from '../js/lyricsmodel.js';
 
 const L = (start, text = 'x') => ({ start, end: null, text, words: [], trans: null });
 
@@ -60,6 +60,46 @@ test('clock does not jump back on small jitter', () => {
   c.set(10400, true, 1500); // report 100 ms behind what was shown
   assert.ok(c.at(1500) >= 10500);
   assert.ok(c.at(1800) >= 10500);
+});
+
+for (const lead of [100, 300, 390]) {
+  test(`clock: a ${lead} ms startup lead converges without stepping back`, () => {
+    const c = clock();
+    c.seek(lead, true, 0); // the first report is ahead of the audio
+    let prev = -Infinity;
+    for (let now = 0; now <= 3000; now += 16) {
+      if (now % 256 === 0 && now > 0) c.set(now, true, now); // true position = now
+      const shown = c.at(now);
+      assert.ok(shown >= prev, `stepped back at ${now}: ${prev} -> ${shown}`);
+      prev = shown;
+      if (now >= 1000) assert.ok(Math.abs(shown - now) <= 16, `still off at ${now}: ${shown}`);
+    }
+  });
+}
+
+test('clock: a big backward report is still followed, and the clock runs on from it', () => {
+  const c = clock();
+  c.set(10000, true, 0);
+  assert.equal(c.at(500), 10500);
+  c.set(10000, true, 500); // 500 ms behind what was shown
+  assert.equal(c.at(500), 10000);
+  assert.equal(c.at(700), 10200);
+});
+
+test('latest: a superseded call that rejects resolves to STALE; the newest still rejects', async () => {
+  const run = latest();
+  let fail;
+  const old = run(() => new Promise((_, rej) => { fail = rej; }));
+  const now = run(async () => 'new');
+  fail(new Error('late'));
+  assert.equal(await old, STALE);
+  assert.equal(await now, 'new');
+  await assert.rejects(run(async () => { throw new Error('boom'); }), /boom/);
+});
+
+test('searchArgs: a cleared field is sent as blank, never null', () => {
+  assert.deepEqual(searchArgs('s1', ' A ', ''), { id: 's1', title: 'A', artist: '' });
+  assert.deepEqual(searchArgs('s1', '', '  B'), { id: 's1', title: '', artist: 'B' });
 });
 
 test('stale_response_is_ignored', async () => {

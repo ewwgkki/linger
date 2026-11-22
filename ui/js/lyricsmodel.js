@@ -74,34 +74,48 @@ export function scrollGate(ms) {
 
 /**
  * Playback clock in ms. `set(pos, playing, now)` takes a report from the player; `at(now)` reads the
- * interpolated position. A report slightly behind what was already shown (< 400 ms) is ignored while
- * playing so the highlight never steps back; a bigger jump (a seek) is followed at once.
+ * interpolated position. Every report is stored. While playing, the shown time holds still rather than
+ * step back after a report slightly behind it (< 400 ms), so it converges on the true position; a bigger
+ * jump (a seek) is followed at once.
  */
 export function clock() {
-  let base = 0, t0 = 0, playing = false;
-  const at = (now) => (playing ? base + Math.max(0, now - t0) : base);
+  let base = 0, t0 = 0, playing = false, shown = 0;
+  const at = (now) => {
+    if (!playing) return base;
+    shown = Math.max(shown, base + Math.max(0, now - t0));
+    return shown;
+  };
+  const snap = (pos, isPlaying, now) => { base = pos; t0 = now; playing = !!isPlaying; shown = pos; };
   return {
     set(pos, isPlaying, now) {
       const cur = at(now);
-      if (playing && isPlaying && pos < cur && cur - pos < 400) return;
-      base = pos; t0 = now; playing = !!isPlaying;
+      if (playing && isPlaying && pos < cur && cur - pos < 400) { base = pos; t0 = now; return; }
+      snap(pos, isPlaying, now);
     },
     /** A real jump (seek, new song): always snaps, even when only slightly backwards. */
-    seek(pos, isPlaying, now) { base = pos; t0 = now; playing = !!isPlaying; },
+    seek: snap,
     at,
   };
 }
 
+/** Arguments of a manual search; a field the user cleared is sent blank, so it is not filled from the tag. */
+export const searchArgs = (id, title, artist) => ({ id, title: title.trim(), artist: artist.trim() });
+
 /** Marks a result that was superseded by a later call. */
 export const STALE = Symbol('stale');
 
-/** `const run = latest(); run(asyncFn)` calls asyncFn now; only the most recent run resolves with its value, older ones with STALE. */
+/** `const run = latest(); run(asyncFn)` calls asyncFn now; only the most recent run settles with its result, older ones resolve to STALE (also when they fail). */
 export function latest() {
   let n = 0;
   return async (fn) => {
     const me = ++n;
-    const r = await fn();
-    return me === n ? r : STALE;
+    try {
+      const r = await fn();
+      return me === n ? r : STALE;
+    } catch (e) {
+      if (me !== n) return STALE;
+      throw e;
+    }
   };
 }
 

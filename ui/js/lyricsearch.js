@@ -3,7 +3,7 @@ import { t } from './i18n.js';
 import { api } from './api.js';
 import { esc, mmss } from './util.js';
 import { ly, subscribe, choose, useFile } from './lyrics.js';
-import { pickStillValid } from './lyricsmodel.js';
+import { pickStillValid, searchArgs } from './lyricsmodel.js';
 
 const $ = (id) => document.getElementById(id);
 let ctx = null;
@@ -46,7 +46,7 @@ async function search() {
   say(t('lyrics.searching'));
   let found;
   try {
-    found = await api.invoke('lyrics_search', { id, title: $('lystitle').value.trim() || null, artist: $('lysartist').value.trim() || null });
+    found = await api.invoke('lyrics_search', searchArgs(id, $('lystitle').value, $('lysartist').value));
   } catch (e) {
     if (me === searchSeq && songId === id) say(errText(e), true);
     return;
