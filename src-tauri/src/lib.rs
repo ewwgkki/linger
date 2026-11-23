@@ -9,6 +9,7 @@ pub mod db;
 pub mod derive;
 pub mod ffmpeg;
 pub mod player;
+pub mod resume;
 pub mod scan;
 pub mod state;
 pub mod tags;
@@ -54,6 +55,7 @@ pub fn run() {
             app.manage(state::AppState::new(db, data_dir));
             app.manage(update::UpdateState::default());
             commands::player::init(app.handle());
+            resume::init(app.handle());
             media::init(app.handle());
             if let Err(e) = tray::init(app.handle()) {
                 eprintln!("linger: cannot create tray icon: {e}");

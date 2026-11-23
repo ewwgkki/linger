@@ -44,6 +44,7 @@ Run the installer and choose a folder. No administrator rights are needed, and W
 - Import Spotify playlists from Exportify or Spotify data exports / 从 Exportify 或 Spotify 数据导出导入歌单
 - Synced karaoke-style lyrics and a full-screen play page / 卡拉 OK 式滚动歌词和全屏播放页
 - Lyrics from embedded tags, `.lrc` files, LRCLIB and NetEase / 歌词来自内嵌标签、`.lrc`、LRCLIB 和网易云
+- Reopens where you left off, with your song, position and queue / 重新打开时回到上次的歌曲、进度和队列
 - Keyboard media keys and the Windows media overlay / 支持键盘媒体键和 Windows 系统播放浮层
 - Keeps playing in the system tray when the window is closed / 关闭窗口后在系统托盘继续播放
 - Classic and Fresh themes, with light and dark modes that follow Windows / 经典和小清新两种主题，浅色和深色跟随 Windows

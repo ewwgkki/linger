@@ -1,5 +1,9 @@
 //! Play queue — mirrors the web version's `player` object (queue/order/i), plus repeat modes.
 
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Repeat {
     All,
@@ -42,6 +46,16 @@ impl Part {
             _ => None,
         }
     }
+}
+
+/// The saved form of a queue (modes are stored separately).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueSnapshot {
+    pub up: Vec<String>,
+    pub extra: Option<String>,
+    pub items: Vec<String>,
+    pub order: Vec<usize>,
+    pub pos: usize,
 }
 
 pub struct Queue {
@@ -91,6 +105,51 @@ impl Queue {
 
     fn ctx_current(&self) -> Option<&str> {
         self.order.get(self.pos).and_then(|&i| self.items.get(i)).map(String::as_str)
+    }
+
+    pub fn snapshot(&self) -> QueueSnapshot {
+        QueueSnapshot { up: self.up.clone(), extra: self.extra.clone(), items: self.items.clone(), order: self.order.clone(), pos: self.pos }
+    }
+
+    /// Restores a saved queue without songs that are gone. Damaged data leaves the queue as it
+    /// is. Returns whether there is a current song.
+    pub fn restore(&mut self, s: QueueSnapshot, exists: &dyn Fn(&str) -> bool) -> bool {
+        let n = s.items.len();
+        let mut seen = vec![false; n];
+        let whole = s.order.len() == n
+            && s.order.iter().all(|&o| o < n && !std::mem::replace(&mut seen[o], true))
+            && (n == 0 || s.pos < n);
+        if !whole {
+            return false;
+        }
+        let mut new_index = vec![None; n];
+        let mut items = Vec::with_capacity(n);
+        for (i, id) in s.items.into_iter().enumerate() {
+            if exists(&id) {
+                new_index[i] = Some(items.len());
+                items.push(id);
+            }
+        }
+        let kept_before = s.order[..s.pos.min(n)].iter().filter(|&&o| new_index[o].is_some()).count();
+        let order: Vec<usize> = s.order.iter().filter_map(|&o| new_index[o]).collect();
+        self.pos = kept_before.min(order.len().saturating_sub(1));
+        self.items = items;
+        self.order = order;
+        self.up = s.up.into_iter().filter(|id| exists(id)).collect();
+        self.extra = s.extra.filter(|id| exists(id));
+        if self.current().is_none() && !self.up.is_empty() {
+            self.extra = Some(self.up.remove(0));
+        }
+        self.current().is_some()
+    }
+
+    /// Follows songs whose ids changed because their files were renamed.
+    pub fn remap(&mut self, moved: &HashMap<String, String>) {
+        for id in self.up.iter_mut().chain(self.extra.iter_mut()).chain(self.items.iter_mut()) {
+            if let Some(new) = moved.get(id) {
+                *id = new.clone();
+            }
+        }
     }
 
     /// `auto`: the previous song ended by itself (vs. the user pressing next).
@@ -295,6 +354,66 @@ impl Queue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn snap(items_: &[&str], order: &[usize], pos: usize) -> QueueSnapshot {
+        QueueSnapshot { up: vec![], extra: None, items: items_.iter().map(|s| s.to_string()).collect(), order: order.to_vec(), pos }
+    }
+
+    #[test]
+    fn snapshot_restores_order_position_and_user_queue() {
+        let mut a = Queue::new(1);
+        a.play_list(items(4), 1, false);
+        a.next(false);
+        a.add_last(vec!["x".into()]);
+        let saved = a.snapshot();
+        let mut b = Queue::new(2);
+        assert!(b.restore(saved.clone(), &|_| true));
+        assert_eq!(b.snapshot(), saved);
+        assert_eq!(b.current(), a.current());
+        assert_eq!(b.next(false), Some("x"));
+    }
+
+    #[test]
+    fn restore_drops_missing_songs() {
+        let mut q = Queue::new(1);
+        assert!(q.restore(snap(&["a", "b", "c", "d"], &[0, 1, 2, 3], 1), &|id| id != "b"));
+        assert_eq!(q.current(), Some("c"));
+        assert_eq!(q.upcoming(9).0, vec!["d".to_string()]);
+    }
+
+    #[test]
+    fn restore_when_the_last_song_is_gone_uses_the_one_before() {
+        let mut q = Queue::new(1);
+        assert!(q.restore(snap(&["a", "b"], &[0, 1], 1), &|id| id != "b"));
+        assert_eq!(q.current(), Some("a"));
+    }
+
+    #[test]
+    fn restore_falls_back_to_the_user_queue() {
+        let mut q = Queue::new(1);
+        let s = QueueSnapshot { up: vec!["u".into()], ..snap(&["a"], &[0], 0) };
+        assert!(q.restore(s, &|id| id == "u"));
+        assert_eq!(q.current(), Some("u"));
+    }
+
+    #[test]
+    fn restore_rejects_damaged_data() {
+        for s in [snap(&["a", "b"], &[0], 0), snap(&["a", "b"], &[0, 0], 0), snap(&["a", "b"], &[0, 5], 0), snap(&["a", "b"], &[0, 1], 2)] {
+            let mut q = Queue::new(1);
+            assert!(!q.restore(s, &|_| true));
+            assert!(q.is_empty());
+        }
+    }
+
+    #[test]
+    fn remap_follows_renamed_songs() {
+        let mut q = Queue::new(1);
+        q.play_list(vec!["a".into(), "b".into()], 0, false);
+        q.add_last(vec!["b".into()]);
+        q.remap(&HashMap::from([("b".to_string(), "n".to_string())]));
+        assert_eq!(q.upcoming(5).0, vec!["n".to_string()]);
+        assert_eq!(q.up_next(), ["n".to_string()]);
+    }
 
     fn items(n: usize) -> Vec<String> {
         (0..n).map(|i| ((b'a' + i as u8) as char).to_string()).collect()

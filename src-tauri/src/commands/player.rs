@@ -4,6 +4,7 @@
 //! Events: "player://state" PlayerStateDto, "player://pos" { pos }, "player://error" { id, reason },
 //! "library://online" Vec<RootDto> (a folder found unreachable while playing).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -14,7 +15,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::db::{Db, Root, SongRow};
 use crate::player::decode::DecodeError;
 use crate::player::engine::{Engine, EngineEvent};
-use crate::player::queue::{Part, Queue, Repeat};
+use crate::player::queue::{Part, Queue, QueueSnapshot, Repeat};
+use crate::resume::{start_pos, SavedPos};
 use crate::state::AppState;
 
 const SKIP_DELAY: Duration = Duration::from_millis(1200);
@@ -123,11 +125,13 @@ struct Inner {
     gen: u64,
     /// engine epoch of the track we expect events from (from the last load/seek/stop)
     epoch: u64,
+    /// reopened paused at this position; the song is loaded on the first play
+    resume_at: Option<f64>,
 }
 
 impl Inner {
     fn new(queue: Queue, volume: u8) -> Inner {
-        Inner { queue, id: None, playing: false, loaded: false, pos: 0.0, dur: 0.0, volume, failures: 0, gen: 0, epoch: 0 }
+        Inner { queue, id: None, playing: false, loaded: false, pos: 0.0, dur: 0.0, volume, failures: 0, gen: 0, epoch: 0, resume_at: None }
     }
 }
 
@@ -146,6 +150,13 @@ impl Player {
     pub fn media_status(&self) -> MediaStatus {
         let i = self.inner();
         MediaStatus { id: i.id.clone(), playing: i.playing, pos: i.pos, duration: i.dur }
+    }
+    pub fn session(&self) -> crate::resume::Session {
+        let i = self.inner();
+        crate::resume::Session { queue: i.queue.snapshot(), id: i.id.clone(), pos: i.pos, playing: i.playing }
+    }
+    pub fn session_playing(&self) -> bool {
+        self.inner().playing
     }
     /// Current song id and whether it is playing.
     pub fn status(&self) -> (Option<String>, bool) {
@@ -190,6 +201,54 @@ pub fn init(app: &AppHandle) {
     let engine = Engine::spawn(Box::new(move |epoch, ev| handle_event(&h, epoch, ev)));
     engine.set_volume(state.player.inner().volume as f32 / 100.0);
     let _ = state.player.engine.set(engine);
+    restore_session(&state);
+}
+
+/// Puts the last session back, paused. Nothing is loaded until the user presses play.
+fn restore_session(state: &AppState) {
+    let (saved, songs) = {
+        let db = state.db();
+        (crate::resume::read(&db), db.song_ids().unwrap_or_default())
+    };
+    let Some((queue, pos)) = saved else { return };
+    let mut i = state.player.inner();
+    let duration_of = |id: &str| state.db().song(id).ok().flatten().map_or(0.0, |s| s.duration);
+    restore_inner(&mut i, queue, pos, &|id| songs.contains(id), &duration_of);
+}
+
+fn restore_inner(
+    i: &mut Inner,
+    queue: QueueSnapshot,
+    saved: Option<SavedPos>,
+    exists: &dyn Fn(&str) -> bool,
+    duration_of: &dyn Fn(&str) -> f64,
+) {
+    if !i.queue.restore(queue, exists) {
+        return;
+    }
+    let id = i.queue.current().map(str::to_string);
+    i.dur = id.as_deref().map_or(0.0, duration_of);
+    i.pos = saved.filter(|s| Some(&s.id) == id.as_ref()).map_or(0.0, |s| start_pos(s.pos, i.dur));
+    i.resume_at = (i.pos > 0.0).then_some(i.pos);
+    i.id = id;
+    i.playing = false;
+    i.loaded = false;
+}
+
+/// Songs whose files were renamed keep their place in the queue.
+pub fn follow_renames(app: &AppHandle, moved: &[(String, String)]) {
+    if moved.is_empty() {
+        return;
+    }
+    let map: HashMap<String, String> = moved.iter().cloned().collect();
+    let state = app.state::<AppState>();
+    let mut i = state.player.inner();
+    i.queue.remap(&map);
+    if let Some(new) = i.id.as_ref().and_then(|id| map.get(id)).cloned() {
+        i.id = Some(new);
+    }
+    emit_state(app, &i);
+    emit_queue(app);
 }
 
 fn dto(i: &Inner) -> PlayerStateDto {
@@ -208,11 +267,13 @@ fn emit_state(app: &AppHandle, i: &Inner) {
     let _ = app.emit("player://state", dto(i));
     crate::tray::notify(app);
     crate::media::notify(app);
+    crate::resume::notify(app);
 }
 
 /// The queue view changed (no payload; the UI re-fetches `player_queue`).
 fn emit_queue(app: &AppHandle) {
     let _ = app.emit("player://queue", ());
+    crate::resume::notify(app);
 }
 
 /// How many upcoming source songs `player_queue` returns.
@@ -239,6 +300,7 @@ fn save(state: &AppState, key: &str, value: &str) {
 
 /// Loads the queue's current song into the engine. Lock order: player inner → db.
 fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool) {
+    i.resume_at = None;
     i.gen += 1;
     i.pos = 0.0;
     i.id = i.queue.current().map(str::to_string);
@@ -264,6 +326,19 @@ fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool
     i.playing = autoplay;
     i.loaded = true;
     state.player.retarget(i, |e| e.load(path, song.start_ms, song.end_ms, autoplay));
+}
+
+/// Starts the unloaded current song, from the remembered position if there is one.
+fn start_current(app: &AppHandle, state: &AppState, i: &mut Inner) {
+    let at = i.resume_at;
+    load_current(app, state, i, at.is_none());
+    if let (Some(secs), true) = (at, i.loaded) {
+        i.gen += 1;
+        i.pos = secs;
+        state.player.retarget(i, |e| e.seek(secs));
+        i.playing = true;
+        state.player.with_engine(|e| e.play());
+    }
 }
 
 /// A song could not be played: report it, then skip after 1.2 s or stop. On a not-found / IO
@@ -436,7 +511,7 @@ pub fn player_toggle(app: AppHandle, state: State<'_, AppState>) {
     }
     if !i.loaded {
         i.failures = 0;
-        load_current(&app, &state, &mut i, true);
+        start_current(&app, &state, &mut i);
     } else if i.playing {
         i.playing = false;
         state.player.with_engine(|e| e.pause());
@@ -466,6 +541,10 @@ pub fn player_prev(app: AppHandle, state: State<'_, AppState>) {
         i.gen += 1;
         i.pos = 0.0;
         state.player.retarget(&mut i, |e| e.seek(0.0));
+    } else if i.resume_at.is_some_and(|at| at > PREV_RESTART_SECS) {
+        // reopened partway through: "previous" restarts this song, as it does while playing
+        i.failures = 0;
+        load_current(&app, &state, &mut i, true);
     } else {
         if i.queue.prev().is_none() {
             return;
@@ -611,6 +690,35 @@ pub fn player_state(state: State<'_, AppState>) -> PlayerStateDto {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn queue_of(ids: &[&str], pos: usize) -> QueueSnapshot {
+        QueueSnapshot { up: vec![], extra: None, items: ids.iter().map(|s| s.to_string()).collect(), order: (0..ids.len()).collect(), pos }
+    }
+
+    #[test]
+    fn reopening_restores_paused_at_the_position() {
+        let mut i = Inner::new(Queue::new(1), 80);
+        let saved = SavedPos { id: "b".into(), pos: 42.0 };
+        restore_inner(&mut i, queue_of(&["a", "b"], 1), Some(saved), &|_| true, &|_| 200.0);
+        assert_eq!(i.id.as_deref(), Some("b"));
+        assert_eq!((i.pos, i.dur, i.playing, i.loaded, i.resume_at), (42.0, 200.0, false, false, Some(42.0)));
+    }
+
+    #[test]
+    fn a_position_for_another_song_is_ignored() {
+        let mut i = Inner::new(Queue::new(1), 80);
+        let saved = SavedPos { id: "gone".into(), pos: 42.0 };
+        restore_inner(&mut i, queue_of(&["gone", "b"], 0), Some(saved), &|id| id != "gone", &|_| 200.0);
+        assert_eq!(i.id.as_deref(), Some("b"));
+        assert_eq!((i.pos, i.resume_at), (0.0, None));
+    }
+
+    #[test]
+    fn nothing_left_means_a_fresh_start() {
+        let mut i = Inner::new(Queue::new(1), 80);
+        restore_inner(&mut i, queue_of(&["a"], 0), None, &|_| false, &|_| 200.0);
+        assert_eq!((i.id.clone(), i.resume_at), (None, None));
+    }
 
     #[test]
     fn all_failing_queue_stops() {

@@ -476,6 +476,11 @@ impl Db {
         let v = st.query_map([], Self::map_song)?.collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(v)
     }
+    pub fn song_ids(&self) -> Result<std::collections::HashSet<String>> {
+        let mut st = self.conn.prepare("SELECT id FROM songs")?;
+        let ids = st.query_map([], |r| r.get(0))?.collect::<std::result::Result<_, _>>()?;
+        Ok(ids)
+    }
     pub fn song(&self, id: &str) -> Result<Option<SongRow>> {
         let mut st = self.conn.prepare(&format!("{} WHERE s.id=?1", Self::SONG_SELECT))?;
         Ok(st.query_row([id], Self::map_song).optional()?)

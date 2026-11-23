@@ -296,6 +296,7 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
     let rep = scan_shared(&state.db, &roots, &online, &mut |p| {
         let _ = app.emit("scan://progress", p);
     });
+    super::player::follow_renames(app, &rep.moved);
     // drop thumbnails of files that changed, vanished or belong to removed folders
     crate::cover::prune_with_db(state);
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);

@@ -316,6 +316,7 @@ pub fn prepare_exit(app: &AppHandle) {
         t.quitting.store(true, Ordering::SeqCst);
         let _ = t.icon.set_visible(false);
     }
+    crate::resume::save_now(app);
     let state = app.state::<AppState>();
     state.player.shutdown();
     let locked = state.db.try_lock();
@@ -346,6 +347,7 @@ pub fn quit(app: &AppHandle) {
     }
     let h = app.clone();
     let spawned = std::thread::Builder::new().name("linger-quit".into()).spawn(move || {
+        crate::resume::save_now(&h);
         let state = h.state::<AppState>();
         state.player.shutdown();
         // a running scan may hold the database: its writes are already crash-safe
