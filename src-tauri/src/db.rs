@@ -87,6 +87,9 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE files ADD COLUMN tag_artist TEXT;
      CREATE TABLE name_overrides(song_id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL,
        orig_title TEXT NOT NULL, orig_artist TEXT NOT NULL);",
+    // v6: measured loudness, valid for one version of the file (lufs NULL: nothing measurable)
+    "CREATE TABLE loudness(song_id TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+       lufs REAL, peak REAL);",
 ];
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -354,12 +357,14 @@ impl Db {
             "UPDATE OR IGNORE playlist_items SET song_id=?2 WHERE song_id=?1",
             "UPDATE OR IGNORE favorites SET song_id=?2 WHERE song_id=?1",
             "UPDATE OR IGNORE name_overrides SET song_id=?2 WHERE song_id=?1",
+            "UPDATE OR IGNORE loudness SET song_id=?2 WHERE song_id=?1",
         ] {
             tx.execute(sql, [old_id, &new_id])?;
         }
         tx.execute("DELETE FROM playlist_items WHERE song_id=?1", [old_id])?;
         tx.execute("DELETE FROM favorites WHERE song_id=?1", [old_id])?;
         tx.execute("DELETE FROM name_overrides WHERE song_id=?1", [old_id])?;
+        tx.execute("DELETE FROM loudness WHERE song_id=?1", [old_id])?;
         move_lyric_rows(&tx, old_id, &new_id)?;
         tx.commit()?;
         Ok(true)
@@ -475,6 +480,60 @@ impl Db {
         let mut st = self.conn.prepare(&format!("{} ORDER BY s.rowid", Self::SONG_SELECT))?;
         let v = st.query_map([], Self::map_song)?.collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(v)
+    }
+    /// Songs with no measurement for the current version of their file.
+    pub fn loudness_jobs(&self) -> Result<Vec<crate::loudness::Job>> {
+        let mut st = self.conn.prepare(
+            "SELECT s.id, f.root_id, r.path, f.rel, s.start_ms, s.end_ms, f.size, f.mtime
+             FROM songs s JOIN files f ON f.id=s.file_id JOIN roots r ON r.id=f.root_id
+             LEFT JOIN loudness l ON l.song_id=s.id AND l.size=f.size AND l.mtime=f.mtime
+             WHERE l.song_id IS NULL ORDER BY f.root_id, f.rel, s.start_ms")?;
+        let rows = st.query_map([], |r| Ok(crate::loudness::Job {
+            id: r.get(0)?, root_id: r.get(1)?, root_path: r.get(2)?, rel: r.get(3)?,
+            start_ms: r.get::<_, i64>(4)? as u64, end_ms: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+            size: r.get::<_, i64>(6)? as u64, mtime: r.get(7)?,
+        }))?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+    /// (songs measured for their current file, all songs)
+    pub fn loudness_counts(&self) -> Result<(usize, usize)> {
+        let total: i64 = self.conn.query_row("SELECT count(*) FROM songs", [], |r| r.get(0))?;
+        let done: i64 = self.conn.query_row(
+            "SELECT count(*) FROM songs s JOIN files f ON f.id=s.file_id
+             JOIN loudness l ON l.song_id=s.id AND l.size=f.size AND l.mtime=f.mtime", [], |r| r.get(0))?;
+        Ok((done as usize, total as usize))
+    }
+    pub fn put_loudness(&self, id: &str, size: u64, mtime: i64, m: Option<crate::loudness::Measure>) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO loudness(song_id,size,mtime,lufs,peak) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(song_id) DO UPDATE SET size=excluded.size, mtime=excluded.mtime, lufs=excluded.lufs, peak=excluded.peak",
+            params![id, size as i64, mtime, m.map(|x| x.lufs), m.map(|x| x.peak)])?;
+        Ok(())
+    }
+    pub fn loudness_of(&self, id: &str) -> Result<Option<crate::loudness::Measure>> {
+        Ok(self.conn.query_row(
+            "SELECT l.lufs, l.peak FROM loudness l JOIN songs s ON s.id=l.song_id JOIN files f ON f.id=s.file_id
+             WHERE l.song_id=?1 AND l.size=f.size AND l.mtime=f.mtime AND l.lufs IS NOT NULL",
+            [id], |r| Ok(crate::loudness::Measure { lufs: r.get(0)?, peak: r.get(1)? })).optional()?)
+    }
+    /// Current measurements of the album's songs in one folder.
+    pub fn all_loudness_for_album(&self, root_id: i64, dir: &str, album: &str) -> Result<Vec<crate::loudness::Measure>> {
+        let mut st = self.conn.prepare(
+            "SELECT f.rel, l.lufs, l.peak FROM songs s JOIN files f ON f.id=s.file_id
+             JOIN loudness l ON l.song_id=s.id AND l.size=f.size AND l.mtime=f.mtime
+             WHERE f.root_id=?1 AND s.album=?2 AND l.lufs IS NOT NULL")?;
+        let rows = st.query_map(params![root_id, album], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?)))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (rel, lufs, peak) = row?;
+            if rel.rsplit_once('/').map_or("", |(d, _)| d) == dir {
+                out.push(crate::loudness::Measure { lufs, peak });
+            }
+        }
+        Ok(out)
+    }
+    pub fn prune_loudness(&self) -> Result<usize> {
+        Ok(self.conn.execute("DELETE FROM loudness WHERE song_id NOT IN (SELECT id FROM songs)", [])?)
     }
     pub fn song_ids(&self) -> Result<std::collections::HashSet<String>> {
         let mut st = self.conn.prepare("SELECT id FROM songs")?;
@@ -853,6 +912,27 @@ mod tests {
         let off: i64 = db.conn().query_row("SELECT offset_ms FROM lyrics_offset WHERE song_id=?1", [&new], |r| r.get(0)).unwrap();
         assert_eq!(off, 500);
         assert!(!db.file_sigs(root).unwrap()["B - A.mp3"].tags_known);
+    }
+    #[test] fn loudness_follows_the_file_version_and_renames() {
+        let mut db = Db::open_in_memory().unwrap();
+        let root = db.add_root("R").unwrap().id;
+        let id = named(&mut db, root, "a/A - B.mp3", "B", "A");
+        assert_eq!(db.loudness_counts().unwrap(), (0, 1));
+        assert_eq!(db.loudness_jobs().unwrap().len(), 1);
+        let m = crate::loudness::Measure { lufs: -12.0, peak: 0.9 };
+        db.put_loudness(&id, 10, 5, Some(m)).unwrap();
+        assert_eq!(db.loudness_of(&id).unwrap(), Some(m));
+        assert_eq!(db.loudness_counts().unwrap(), (1, 1));
+        assert_eq!(db.all_loudness_for_album(root, "a", "").unwrap(), vec![m]);
+        assert!(db.rename_file(root, "R", "a/A - B.mp3", "a/B - A.mp3").unwrap());
+        let new = song_id("R", "a/B - A.mp3", 0);
+        assert_eq!(db.loudness_of(&new).unwrap(), Some(m));
+        db.put_loudness(&new, 11, 5, Some(m)).unwrap();
+        assert_eq!(db.loudness_of(&new).unwrap(), None); // measured an older version of the file
+        assert_eq!(db.loudness_jobs().unwrap().len(), 1);
+        db.put_loudness(&new, 10, 5, None).unwrap();
+        assert!(db.loudness_jobs().unwrap().is_empty()); // nothing measurable: not tried again
+        assert_eq!(db.loudness_of(&new).unwrap(), None);
     }
     #[test] fn song_id_is_stable() {
         assert_eq!(song_id("D:/m", "a/b.mp3", 0), song_id("D:/m", "a/b.mp3", 0));

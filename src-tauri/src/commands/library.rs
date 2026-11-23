@@ -229,6 +229,9 @@ impl ScanGate {
             true
         }
     }
+    pub fn is_running(&self) -> bool {
+        self.lock().running
+    }
     /// The folder the current pass covers (`None` = all).
     pub fn scope(&self) -> Option<i64> {
         self.lock().scope
@@ -305,6 +308,7 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
         let _ = app.emit("playlists://changed", super::playlists::PlaylistsChanged { id: None, favorites: true });
     }
     let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped, renamed: rep.renamed, root: only });
+    crate::loudness::wake(app);
 }
 
 pub fn spawn_scan(app: AppHandle) {

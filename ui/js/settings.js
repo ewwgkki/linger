@@ -50,8 +50,22 @@ export function openSettings(tab) {
   scanInfo();
   ffmpegInfo();
   $('lyneteasesw').checked = ly.netease;
+  refreshSound();
   api.invoke('window_settings').then((s) => { $('closesel').value = s.close_to_tray ? 'tray' : 'quit'; })
     .catch((e) => console.error('window_settings', e));
+}
+
+const sound = { normalize: false, running: false, done: 0, total: 0 };
+function paintSound() {
+  $('normsw').checked = sound.normalize;
+  const busy = sound.normalize && sound.running && sound.done < sound.total;
+  $('normhint').textContent = busy
+    ? t('settings.normalizeBusy', { done: sound.done, total: sound.total })
+    : t('settings.normalizeHint');
+}
+function refreshSound() {
+  api.invoke('sound_settings').then((s) => { Object.assign(sound, s); paintSound(); })
+    .catch((e) => console.error('sound_settings', e));
 }
 
 const SET_TABS = ['general', 'library', 'about'];
@@ -139,6 +153,7 @@ function paintSkins() {
 
 function languageChanged() {
   paintLanguages();
+  paintSound();
   paintSkins();
   renderRoots();
   scanInfo();
@@ -461,6 +476,18 @@ export function initSettings(c, { loadLibrary }) {
     e.target.checked = ly.netease;
     toast(t('lyrics.saveError'), { icon: 'x', autoHide: 6000 });
   });
+  $('normsw').onchange = (e) => {
+    const on = e.target.checked;
+    sound.normalize = on;
+    paintSound();
+    api.invoke('sound_set_normalize', { enabled: on }).catch((err) => {
+      console.error('sound_set_normalize', err);
+      sound.normalize = !on;
+      paintSound();
+      toast(t('settings.closeToTrayError'), { icon: 'x', autoHide: 6000 });
+    });
+  };
+  api.listen('loudness://progress', (p) => { Object.assign(sound, p); paintSound(); });
   $('closesel').onchange = (e) => {
     const on = e.target.value === 'tray';
     api.invoke('window_set_close_to_tray', { enabled: on }).catch((err) => {

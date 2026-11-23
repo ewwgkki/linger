@@ -25,7 +25,7 @@ fn main() {
     for (n, f) in files.iter().enumerate() {
         let ext = f.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
         let t0 = Instant::now();
-        engine.load(f.clone(), 0, Some(5000), true);
+        engine.load(f.clone(), 0, Some(5000), true, 1.0);
         let (mut positions, mut last_pos, mut first_pos_at) = (0, 0.0, None);
         let outcome = loop {
             match rx.recv_timeout(Duration::from_secs(30)) {
@@ -50,7 +50,7 @@ fn main() {
     }
     // segment + seek: play 60..70 s of the first file, seek to 5 s into the segment after 1 s
     let t0 = Instant::now();
-    engine.load(files[0].clone(), 60_000, Some(70_000), true);
+    engine.load(files[0].clone(), 60_000, Some(70_000), true, 1.0);
     let mut seeked = false;
     let (mut min_after_seek, mut last_pos) = (f64::MAX, 0.0);
     let outcome = loop {

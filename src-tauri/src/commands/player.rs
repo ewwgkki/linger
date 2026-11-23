@@ -235,6 +235,18 @@ fn restore_inner(
     i.loaded = false;
 }
 
+/// The volume balance setting changed: applies it to the song playing now.
+pub fn refresh_gain(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let i = state.player.inner();
+    let Some(id) = i.id.clone() else { return };
+    let song = state.db().song(&id).ok().flatten();
+    if let Some(song) = song {
+        let gain = crate::loudness::song_gain(app, &song, &i.queue.around());
+        state.player.with_engine(|e| e.set_gain(gain));
+    }
+}
+
 /// Songs whose files were renamed keep their place in the queue.
 pub fn follow_renames(app: &AppHandle, moved: &[(String, String)]) {
     if moved.is_empty() {
@@ -325,7 +337,8 @@ fn load_current(app: &AppHandle, state: &AppState, i: &mut Inner, autoplay: bool
     i.dur = song.duration;
     i.playing = autoplay;
     i.loaded = true;
-    state.player.retarget(i, |e| e.load(path, song.start_ms, song.end_ms, autoplay));
+    let gain = crate::loudness::song_gain(app, &song, &i.queue.around());
+    state.player.retarget(i, |e| e.load(path, song.start_ms, song.end_ms, autoplay, gain));
 }
 
 /// Starts the unloaded current song, from the remembered position if there is one.

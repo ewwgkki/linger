@@ -1,4 +1,5 @@
 pub mod import;
+pub mod loudness;
 pub mod lyrics;
 pub mod media;
 pub mod naming;
@@ -56,6 +57,7 @@ pub fn run() {
             app.manage(update::UpdateState::default());
             commands::player::init(app.handle());
             resume::init(app.handle());
+            loudness::init(app.handle());
             media::init(app.handle());
             if let Err(e) = tray::init(app.handle()) {
                 eprintln!("linger: cannot create tray icon: {e}");
@@ -68,6 +70,8 @@ pub fn run() {
             commands::app::open_link,
             commands::app::take_installer_language,
             tray::window_settings,
+            loudness::sound_settings,
+            loudness::sound_set_normalize,
             update::update_settings,
             update::update_set_auto,
             update::update_check,

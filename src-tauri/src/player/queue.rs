@@ -221,6 +221,19 @@ impl Queue {
         (v, rest.len())
     }
 
+    /// The songs right before and after the current one.
+    pub fn around(&self) -> Vec<String> {
+        let mut out = Vec::with_capacity(2);
+        if self.extra.is_none() && self.pos > 0 {
+            out.extend(self.order.get(self.pos - 1).and_then(|&i| self.items.get(i)).cloned());
+        }
+        match self.up.first() {
+            Some(id) => out.push(id.clone()),
+            None => out.extend(self.order.get(self.pos + 1).and_then(|&i| self.items.get(i)).cloned()),
+        }
+        out
+    }
+
     /// The id at `index` of the part, if any.
     pub fn at(&self, part: Part, index: usize) -> Option<&str> {
         match part {

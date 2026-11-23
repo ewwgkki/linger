@@ -4,7 +4,7 @@
 //! runs dry (network hiccups), ending only on the decoder's explicit end marker.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -24,11 +24,12 @@ pub enum EngineEvent {
 }
 
 enum Cmd {
-    Load { path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool, epoch: u64 },
+    Load { path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool, gain: f32, epoch: u64 },
     Play,
     Pause,
     Seek(f64, u64),
     Volume(f32),
+    Gain(f32),
     Stop,
 }
 
@@ -45,6 +46,8 @@ const POS_EVERY: Duration = Duration::from_millis(250);
 /// Each chunk in the prefetch channel holds ~100 ms; 40 of them ≈ 4 s.
 const CHUNKS_PER_SEC: usize = 10;
 const PREFETCH_CHUNKS: usize = 40;
+/// Short fade on pause, resume, skip and seek, so sound never cuts with a click.
+const FADE: Duration = Duration::from_millis(180);
 
 impl Engine {
     /// `on_event(epoch, event)`: `epoch` is the value returned by the `load`/`seek` that
@@ -60,9 +63,9 @@ impl Engine {
         Engine { tx, epoch }
     }
     /// Returns the new epoch; events for this track carry it.
-    pub fn load(&self, path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool) -> u64 {
+    pub fn load(&self, path: PathBuf, start_ms: u64, end_ms: Option<u64>, autoplay: bool, gain: f32) -> u64 {
         let epoch = self.bump();
-        self.send(Cmd::Load { path, start_ms, end_ms, autoplay, epoch });
+        self.send(Cmd::Load { path, start_ms, end_ms, autoplay, gain, epoch });
         epoch
     }
     pub fn play(&self) {
@@ -81,6 +84,10 @@ impl Engine {
     /// 0..1 (applied as v², which sounds more linear)
     pub fn set_volume(&self, v: f32) {
         self.send(Cmd::Volume(v));
+    }
+    /// Volume balance for the current song (1.0 = unchanged).
+    pub fn set_gain(&self, gain: f32) {
+        self.send(Cmd::Gain(gain));
     }
     /// Returns the new epoch.
     pub fn stop(&self) -> u64 {
@@ -169,7 +176,52 @@ struct Shared {
     error: Mutex<Option<DecodeError>>,
 }
 
+/// Moves a level toward its target by a fixed step per sample.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Ramp {
+    value: f32,
+    step: f32,
+}
+
+impl Ramp {
+    fn new(value: f32, rate: u32, channels: u16) -> Ramp {
+        let samples = (rate as f32 * channels.max(1) as f32 * FADE.as_secs_f32()).max(1.0);
+        Ramp { value, step: 1.0 / samples }
+    }
+    fn next(&mut self, target: f32) -> f32 {
+        self.value = if self.value < target { (self.value + self.step).min(target) } else { (self.value - self.step).max(target) };
+        self.value
+    }
+}
+
+/// Live targets the audio callback reads without locking.
+struct Controls {
+    level: AtomicU32,
+    gain: AtomicU32,
+}
+
+impl Controls {
+    fn new(level: f32, gain: f32) -> Arc<Controls> {
+        Arc::new(Controls { level: AtomicU32::new(level.to_bits()), gain: AtomicU32::new(gain.to_bits()) })
+    }
+    fn fade_to(&self, level: f32) {
+        self.level.store(level.to_bits(), Ordering::Relaxed);
+    }
+    fn set_gain(&self, gain: f32) {
+        self.gain.store(gain.to_bits(), Ordering::Relaxed);
+    }
+    fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+    fn gain(&self) -> f32 {
+        f32::from_bits(self.gain.load(Ordering::Relaxed))
+    }
+}
+
 struct StreamSource {
+    controls: Arc<Controls>,
+    level: Ramp,
+    gain: Ramp,
     rx: Receiver<Msg>,
     cur: Vec<f32>,
     idx: usize,
@@ -211,7 +263,9 @@ impl Iterator for StreamSource {
                 if self.played.is_multiple_of(2048) {
                     self.shared.played.store(self.played, Ordering::Relaxed);
                 }
-                return Some(s);
+                let level = self.level.next(self.controls.level());
+                let gain = self.gain.next(self.controls.gain());
+                return Some((s * level * gain).clamp(-1.0, 1.0));
             }
             self.shared.played.store(self.played, Ordering::Relaxed);
             match self.rx.try_recv() {
@@ -265,6 +319,12 @@ struct Track {
     shared: Arc<Shared>,
     /// samples per second (rate × channels) of the current decoder
     frame_samples: f64,
+    controls: Arc<Controls>,
+    gain: f32,
+    /// replaces sound that was audible, so it fades in
+    fade_in: bool,
+    /// the sink pauses once the fade-out has finished
+    pause_at: Option<Instant>,
 }
 
 impl Track {
@@ -276,14 +336,30 @@ impl Track {
             self.offset
         }
     }
-    fn restart(&mut self, secs: f64) {
-        self.sink = None; // stops the old source; its receiver drops → decode thread exits
+    fn restart(&mut self, secs: f64, fading: &mut Vec<(Sink, Instant)>) {
+        // the old source fades out; when its sink drops, the decode thread exits
+        if retire(self.sink.take(), &self.controls, fading) {
+            self.fade_in = true;
+        }
+        self.pause_at = None;
+        self.controls = Controls::new(if self.playing { 1.0 } else { 0.0 }, self.gain);
         self.shared = Arc::default();
         self.frame_samples = 0.0;
         self.offset = secs;
         let at = self.start_ms + (secs * 1000.0) as u64;
         self.pending = Some(spawn_decoder(self.path.clone(), at, self.end_ms));
     }
+}
+
+/// Lets a replaced sink fade out. Returns whether it was audible.
+fn retire(sink: Option<Sink>, controls: &Controls, fading: &mut Vec<(Sink, Instant)>) -> bool {
+    let Some(sink) = sink else { return false };
+    if sink.is_paused() {
+        return false;
+    }
+    controls.fade_to(0.0);
+    fading.push((sink, Instant::now() + FADE + TICK));
+    true
 }
 
 fn open_output() -> Option<(OutputStream, OutputStreamHandle)> {
@@ -306,11 +382,15 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, Engin
     let mut volume: f32 = 1.0;
     let mut track: Option<Track> = None;
     let mut last_pos = Instant::now();
+    let mut fading: Vec<(Sink, Instant)> = Vec::new();
 
     loop {
-        match rx.recv_timeout(TICK) {
-            Ok(Cmd::Load { path, start_ms, end_ms, autoplay, epoch: ep }) => {
-                track = None; // drops the old sink + receivers → the old decode thread exits
+        let received = rx.recv_timeout(TICK);
+        let now = Instant::now();
+        fading.retain(|(_, until)| *until > now);
+        match received {
+            Ok(Cmd::Load { path, start_ms, end_ms, autoplay, gain, epoch: ep }) => {
+                let replaced = track.take().is_some_and(|mut old| retire(old.sink.take(), &old.controls, &mut fading));
                 if output.is_none() {
                     output = open_output(); // a device may have been plugged in since
                 }
@@ -329,30 +409,39 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, Engin
                     sink: None,
                     shared: Arc::default(),
                     frame_samples: 0.0,
+                    controls: Controls::new(if autoplay { 1.0 } else { 0.0 }, gain),
+                    gain,
+                    fade_in: replaced,
+                    pause_at: None,
                 };
-                t.restart(0.0);
+                t.restart(0.0, &mut fading);
                 track = Some(t);
             }
             Ok(Cmd::Play) => {
                 if let Some(t) = track.as_mut() {
                     t.playing = true;
-                    if let Some(s) = &t.sink {
-                        s.play();
+                    t.pause_at = None;
+                    t.controls.fade_to(1.0);
+                    match &t.sink {
+                        Some(s) => s.play(),
+                        // reopened partway through a song: it should not start abruptly
+                        None => t.fade_in = true,
                     }
                 }
             }
             Ok(Cmd::Pause) => {
                 if let Some(t) = track.as_mut() {
                     t.playing = false;
-                    if let Some(s) = &t.sink {
-                        s.pause();
+                    t.controls.fade_to(0.0);
+                    if t.sink.as_ref().is_some_and(|s| !s.is_paused()) {
+                        t.pause_at = Some(Instant::now() + FADE);
                     }
                 }
             }
             Ok(Cmd::Seek(secs, ep)) => {
                 if let Some(t) = track.as_mut() {
                     t.epoch = ep;
-                    t.restart(if secs.is_finite() { secs.max(0.0) } else { 0.0 });
+                    t.restart(if secs.is_finite() { secs.max(0.0) } else { 0.0 }, &mut fading);
                 }
             }
             Ok(Cmd::Volume(v)) => {
@@ -361,12 +450,28 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, Engin
                     s.set_volume(volume * volume);
                 }
             }
-            Ok(Cmd::Stop) => track = None,
+            Ok(Cmd::Gain(g)) => {
+                if let Some(t) = track.as_mut() {
+                    t.gain = g;
+                    t.controls.set_gain(g);
+                }
+            }
+            Ok(Cmd::Stop) => {
+                if let Some(mut old) = track.take() {
+                    retire(old.sink.take(), &old.controls, &mut fading);
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
 
         let Some(t) = track.as_mut() else { continue };
+        if t.pause_at.is_some_and(|at| Instant::now() >= at) {
+            t.pause_at = None;
+            if let Some(s) = &t.sink {
+                s.pause();
+            }
+        }
         if !current(t) {
             continue; // superseded by a queued load/seek/stop
         }
@@ -403,7 +508,12 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, Engin
                 sink.pause();
             }
             t.frame_samples = rate as f64 * channels as f64;
+            let start_level = if t.fade_in || !t.playing { 0.0 } else { 1.0 };
+            t.fade_in = false;
             sink.append(StreamSource {
+                controls: t.controls.clone(),
+                level: Ramp::new(start_level, rate, channels),
+                gain: Ramp { value: t.gain, ..Ramp::new(t.gain, rate, channels) },
                 rx: data,
                 cur: Vec::new(),
                 idx: 0,
@@ -441,5 +551,75 @@ fn run(rx: Receiver<Cmd>, epoch: Arc<AtomicU64>, on_event: Box<dyn Fn(u64, Engin
                 emit(ep, EngineEvent::Position(t.position()));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod fade_tests {
+    use super::*;
+
+    #[test]
+    fn a_fade_reaches_its_target_in_time_and_stops_there() {
+        let mut r = Ramp::new(0.0, 44_100, 2);
+        let samples = (44_100.0 * 2.0 * FADE.as_secs_f64()).ceil() as usize + 1;
+        for _ in 0..samples {
+            r.next(1.0);
+        }
+        assert_eq!(r.value, 1.0);
+        assert_eq!(r.next(1.0), 1.0);
+        for _ in 0..samples {
+            r.next(0.0);
+        }
+        assert_eq!(r.value, 0.0);
+    }
+
+    #[test]
+    fn a_fade_never_jumps() {
+        let mut r = Ramp::new(0.0, 44_100, 2);
+        let mut last = r.value;
+        for _ in 0..2_000 {
+            let v = r.next(1.0);
+            assert!(v >= last && v - last <= r.step + f32::EPSILON);
+            last = v;
+        }
+    }
+
+    fn source(samples: Vec<f32>, level: f32, gain: f32) -> StreamSource {
+        let (tx, rx) = mpsc::sync_channel(2);
+        tx.send(Msg::Data(samples)).unwrap();
+        tx.send(Msg::End).unwrap();
+        StreamSource {
+            controls: Controls::new(level, gain),
+            level: Ramp::new(level, 44_100, 2),
+            gain: Ramp::new(gain, 44_100, 2),
+            rx,
+            cur: Vec::new(),
+            idx: 0,
+            rate: 44_100,
+            channels: 2,
+            shared: Arc::default(),
+            played: 0,
+            silence: 0,
+            finished: false,
+        }
+    }
+
+    #[test]
+    fn gain_scales_the_sound() {
+        let out: Vec<f32> = source(vec![0.5, -0.5], 1.0, 0.5).collect();
+        assert_eq!(out, vec![0.25, -0.25]);
+    }
+
+    #[test]
+    fn a_boost_cannot_clip() {
+        let out: Vec<f32> = source(vec![0.8, -0.8], 1.0, 2.0).collect();
+        assert_eq!(out, vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn unity_leaves_samples_untouched() {
+        let input = vec![0.1, -0.2, 0.3, -0.4];
+        let out: Vec<f32> = source(input.clone(), 1.0, 1.0).collect();
+        assert_eq!(out, input);
     }
 }

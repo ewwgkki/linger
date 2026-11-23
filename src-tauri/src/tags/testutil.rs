@@ -191,3 +191,30 @@ pub fn write_temp(name: &str, bytes: &[u8]) -> PathBuf {
     std::fs::write(&p, bytes).expect("write temp file");
     p
 }
+
+/// A 16-bit PCM WAV holding a 1 kHz sine wave.
+pub fn wav_tone(rate: u32, channels: u16, secs: f64, amplitude: f64) -> Vec<u8> {
+    let frames = (rate as f64 * secs) as usize;
+    let mut pcm = Vec::with_capacity(frames * channels as usize * 2);
+    for n in 0..frames {
+        let v = (amplitude * (2.0 * std::f64::consts::PI * 1000.0 * n as f64 / rate as f64).sin() * 32767.0) as i16;
+        for _ in 0..channels {
+            pcm.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    let mut out = Vec::with_capacity(44 + pcm.len());
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+    out.extend_from_slice(&(channels * 2).to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
+    out.extend_from_slice(&pcm);
+    out
+}

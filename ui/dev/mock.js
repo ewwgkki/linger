@@ -318,6 +318,11 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    sound_settings: () => ({ normalize: !!globalThis.__normalize, running: !!globalThis.__normalize, done: globalThis.__normalize ? 123 : 0, total: 400 }),
+    sound_set_normalize: ({ enabled }) => {
+      globalThis.__normalize = !!enabled;
+      if (enabled) emit('loudness://progress', { running: true, done: 123, total: 400 });
+    },
     open_link: ({ link }) => { globalThis.__lastLink = link; },
     open_root: ({ id }) => { globalThis.__lastOpenRoot = id; },
     update_settings: () => ({ auto: globalThis.__updAuto !== false, version: '0.6.0' }),
