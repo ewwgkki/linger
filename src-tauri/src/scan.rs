@@ -34,6 +34,8 @@ pub struct ScanReport {
     pub count: usize,
     /// files whose tags were actually read
     pub read: usize,
+    /// files followed to a new name
+    pub renamed: usize,
     pub skipped: Vec<Skipped>,
 }
 
@@ -378,7 +380,9 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
         if !renames.is_empty() {
             with(&mut |db| {
                 for (old, new) in &renames {
-                    let _ = db.rename_file(root.id, &root.path, old, new);
+                    if db.rename_file(root.id, &root.path, old, new).unwrap_or(false) {
+                        rep.renamed += 1;
+                    }
                 }
                 sigs = db.file_sigs(root.id).unwrap_or_default();
             });
@@ -792,6 +796,8 @@ mod tests {
         assert_eq!(songs.len(), 1);
         assert_eq!(songs[0].rel, "Song - Artist.mp3");
         assert_eq!(db.favorites().unwrap()[0].song_id, songs[0].id);
+        std::fs::rename(root.join("Song - Artist.mp3"), root.join("Artist - Song.mp3")).unwrap();
+        assert_eq!(run(&mut db, &roots, &on).renamed, 1);
     }
 
     #[test]

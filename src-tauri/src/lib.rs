@@ -13,6 +13,7 @@ pub mod state;
 pub mod tags;
 pub mod text;
 pub mod tray;
+pub mod update;
 
 use tauri::Manager;
 
@@ -21,6 +22,7 @@ pub fn run() {
         // must be the first plugin: a second launch only wakes the running app
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::show(app)))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(tray::on_window_event)
         .register_asynchronous_uri_scheme_protocol("cover", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -49,6 +51,7 @@ pub fn run() {
             cover::purge_legacy(&data_dir);
             // all roots start optimistic (online); probing + scanning run in the background
             app.manage(state::AppState::new(db, data_dir));
+            app.manage(update::UpdateState::default());
             commands::player::init(app.handle());
             if let Err(e) = tray::init(app.handle()) {
                 eprintln!("linger: cannot create tray icon: {e}");
@@ -58,8 +61,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::set_app_title,
+            commands::app::open_link,
             commands::app::take_installer_language,
             tray::window_settings,
+            update::update_settings,
+            update::update_set_auto,
+            update::update_check,
+            update::update_download,
+            update::update_cancel,
+            update::update_install,
+            commands::library::open_root,
             tray::window_set_close_to_tray,
             commands::library::get_library,
             commands::library::add_roots,

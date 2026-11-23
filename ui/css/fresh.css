@@ -49,7 +49,8 @@
 :root[data-skin="fresh"] .top-actions .btn:hover{background:var(--surface-2);color:var(--ink);filter:none}
 :root[data-skin="fresh"] .icon-btn{border-color:transparent;background:var(--surface-2)}
 :root[data-skin="fresh"] .seg{background:transparent}
-:root[data-skin="fresh"] .dlg .seg{background:var(--surface-2)}
+:root[data-skin="fresh"] .set .seg{background:var(--surface-2)}
+:root[data-skin="fresh"] .set-nav [role=tab][aria-selected="true"]{background:var(--accent-soft);color:var(--accent)}
 :root[data-skin="fresh"] .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);box-shadow:none;font-weight:500}
 :root[data-skin="fresh"] .sorts .seg button[aria-pressed="true"]::after{color:var(--accent)}
 

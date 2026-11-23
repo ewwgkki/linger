@@ -1,4 +1,4 @@
-// Settings dialog (music folders, scan, FFmpeg), scan progress and the toast.
+// Settings dialog (General, Library, About), scan progress and the toast.
 import { t, lang, onLanguage, setLanguage, LANGS, LANG_NAMES } from './i18n.js';
 import { api } from './api.js';
 import { SKINS, currentSkin, setSkin } from './skin.js';
@@ -39,32 +39,79 @@ export function toast(msg, { progress = null, actions = [], icon: ic = 'refresh'
 export function hideToast() { clearTimeout(toastTimer); $('toast').hidden = true; }
 
 // ---------- settings dialog ----------
-export function openSettings() {
+export function openSettings(tab) {
   const d = $('settings');
-  if (!d.open) d.showModal();
+  const first = !d.open;
+  if (first) d.showModal();
+  if (tab || first) setTab(tab || (ctx.lib.roots.length ? 'general' : 'library'));
+  showImportSheet(false);
+  rootMenu = null;
   renderRoots();
   scanInfo();
   ffmpegInfo();
   $('lyneteasesw').checked = ly.netease;
-  api.invoke('window_settings').then((s) => { $('closetraysw').checked = s.close_to_tray; })
+  api.invoke('window_settings').then((s) => { $('closesel').value = s.close_to_tray ? 'tray' : 'quit'; })
     .catch((e) => console.error('window_settings', e));
 }
 
-/** Opens the settings dialog scrolled to the Spotify import section. */
-export function openImport() {
-  openSettings();
-  const sec = $('importsec');
-  sec.scrollIntoView({ block: 'center' });
-  $('importbtn').focus({ preventScroll: true });
+const SET_TABS = ['general', 'library', 'about'];
+function setTab(name) {
+  for (const k of SET_TABS) {
+    const on = k === name;
+    const tab = $(`settab-${k}`);
+    tab.setAttribute('aria-selected', String(on));
+    tab.tabIndex = on ? 0 : -1;
+    $(`setpane-${k}`).hidden = !on;
+  }
+  rootMenu = null;
+  renderRoots();
+  showImportSheet(false);
+  document.querySelector('.set-main').scrollTop = 0;
 }
 
+function showImportSheet(on) {
+  $('importsheet').hidden = !on;
+  if (on) {
+    document.querySelector('.set-main').scrollTop = 0;
+    $('importbtn').focus({ preventScroll: true });
+  }
+}
+
+/** Opens Settings on the Library page with the Spotify import steps showing. */
+export function openImport() {
+  openSettings('library');
+  showImportSheet(true);
+}
+
+let rootMenu = null;
 function renderRoots() {
   const roots = ctx.lib.roots;
-  $('rootlist').innerHTML = roots.length ? roots.map((r) => `<div class="prow${r.online ? '' : ' off'}">${icon(r.online ? 'folder' : 'cloud-off')}
-      <span class="rp" title="${esc(r.path)}">${esc(r.path)}</span>
-      <button class="rm" type="button" data-rm="${r.id}">${esc(t('settings.remove'))}</button>
-      <span class="st ${r.online ? 'ok' : 'bad'}">${esc(t(r.online ? 'settings.online' : 'settings.offline', { n: r.count }))}</span>
-    </div>`).join('') : `<p class="hint">${esc(t('settings.noRoots'))}</p>`;
+  $('rootlist').innerHTML = roots.length ? roots.map((r) => {
+    const count = t(r.online ? 'settings.folderCount' : 'settings.folderOffline', { n: r.count });
+    const name = rootLabel(r);
+    const menu = rootMenu === r.id ? `<div class="set-pop" role="menu">
+        <button type="button" role="menuitem" data-root-act="refresh" data-id="${r.id}">${esc(t('menu.refreshFolder'))}</button>
+        <button type="button" role="menuitem" data-root-act="open" data-id="${r.id}">${esc(t('settings.openFolder'))}</button>
+        <button type="button" role="menuitem" class="danger" data-root-act="remove" data-id="${r.id}">${esc(t('settings.remove'))}</button>
+      </div>` : '';
+    return `<div class="set-folder${r.online ? '' : ' off'}" title="${esc(r.path)}">${icon(r.online ? 'folder' : 'cloud-off')}
+      <span class="nm">${esc(name)}</span><span class="ct">${esc(count)}</span>
+      <button class="set-more" type="button" data-root-more="${r.id}" aria-haspopup="menu" aria-expanded="${rootMenu === r.id}" aria-label="${esc(t('settings.folderMore', { name }))}">${icon('more')}</button>${menu}
+    </div>`;
+  }).join('') : `<p class="set-sub">${esc(t('settings.noRoots'))}</p>`;
+}
+
+function rootAction(act, id) {
+  rootMenu = null;
+  renderRoots();
+  if (act === 'refresh') startScan(true, id);
+  else if (act === 'remove') removeRoot(id);
+  else if (act === 'open') {
+    api.invoke('open_root', { id }).catch((e) => {
+      console.error('open_root', e);
+      toast(t('settings.openFailed'), { icon: 'x', autoHide: 5000 });
+    });
+  }
 }
 
 function scanInfo() {
@@ -81,7 +128,8 @@ function paintSkips() {
 }
 
 function paintLanguages() {
-  $('langseg').innerHTML = LANGS.map((l) => `<button type="button" data-lang="${l}" lang="${l}" aria-pressed="${l === lang()}">${esc(LANG_NAMES[l])}</button>`).join('');
+  $('langsel').innerHTML = LANGS.map((l) => `<option value="${l}" lang="${l}">${esc(LANG_NAMES[l])}</option>`).join('');
+  $('langsel').value = lang();
 }
 
 function paintSkins() {
@@ -105,8 +153,8 @@ function languageChanged() {
 }
 
 function ffmpegInfo() {
-  $('ffmpeginfo').textContent = t(ctx.caps.ffmpeg ? 'settings.ffmpegFound' : 'settings.ffmpegMissing');
-  $('ffmpeginfo').classList.toggle('warn', !ctx.caps.ffmpeg);
+  $('ffmpegrow').hidden = !!ctx.caps.ffmpeg;
+  $('ffmpeginfo').textContent = ctx.caps.ffmpeg ? '' : t('settings.ffmpegMissing');
 }
 
 async function pickFolders() {
@@ -287,7 +335,7 @@ export function startScan(user = true, root = null) {
     endScan();
     const msg = t('scan.error', { msg: errText(e) });
     $('scanmsg').textContent = msg;
-    toast(msg, { icon: 'x', actions: [{ label: t('scan.openSettings'), run: () => { hideToast(); ctx.openSettings(); } }] });
+    toast(msg, { icon: 'x', actions: [{ label: t('scan.openSettings'), run: () => { hideToast(); openSettings('library'); } }] });
   });
 }
 
@@ -296,7 +344,7 @@ function onProgress({ done, total }) {
   progress(t('scan.progress', { done, total }), total ? (done / total) * 100 : 100);
 }
 
-async function onFinished({ count, skipped = [], root = null }) {
+async function onFinished({ count, skipped = [], renamed = 0, root = null }) {
   const wasUser = scan.user, shown = scan.toast, before = scan.before;
   endScan();
   try { await reload(); } catch (e) { console.error('get_library', e); }
@@ -304,11 +352,13 @@ async function onFinished({ count, skipped = [], root = null }) {
   renderRoots();
   let change = null, changed = false;
   if (before) {
-    const added = ctx.lib.songs.filter((s) => !before.has(s.id)).length;
-    const removed = before.size - (ctx.lib.songs.length - added);
-    changed = added > 0 || removed > 0;
+    const newIds = ctx.lib.songs.filter((s) => !before.has(s.id)).length;
+    const gone = before.size - (ctx.lib.songs.length - newIds);
+    const moved = Math.min(renamed, newIds, Math.max(gone, 0));
+    const added = newIds - moved, removed = gone - moved;
+    changed = added > 0 || removed > 0 || moved > 0;
     change = changed
-      ? [added ? t('scan.added', { n: added }) : '', removed > 0 ? t('scan.removed', { n: removed }) : ''].filter(Boolean).join(t('list.sep'))
+      ? [added ? t('scan.added', { n: added }) : '', removed > 0 ? t('scan.removed', { n: removed }) : '', moved ? t('scan.renamed', { n: moved }) : ''].filter(Boolean).join(t('list.sep'))
       : t('scan.noChange');
   }
   const folder = root != null ? ctx.lib.roots.find((r) => r.id === root) : null;
@@ -326,7 +376,7 @@ async function onFinished({ count, skipped = [], root = null }) {
   if (skipped.length) {
     toast(t('scan.withSkipped', { msg, n: skipped.length }), {
       icon: 'check',
-      actions: [{ label: t('scan.view'), run: () => { hideToast(); ctx.openSettings(); $('skipbox').open = true; } }],
+      actions: [{ label: t('scan.view'), run: () => { hideToast(); openSettings('library'); $('skipbox').open = true; } }],
     });
   } else toast(msg, { icon: 'check', autoHide: 5000 });
 }
@@ -353,10 +403,36 @@ export function initSettings(c, { loadLibrary }) {
     setSkin(b.dataset.skinPick);
     paintSkins();
   });
-  $('langseg').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-lang]');
-    if (b) setLanguage(b.dataset.lang).catch(() => toast(t('settings.langError'), { icon: 'x', autoHide: 6000 }));
+  $('langsel').onchange = (e) => {
+    setLanguage(e.target.value).catch(() => {
+      e.target.value = lang();
+      toast(t('settings.langError'), { icon: 'x', autoHide: 6000 });
+    });
+  };
+  const nav = document.querySelector('.set-nav');
+  nav.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-set-tab]');
+    if (b) setTab(b.dataset.setTab);
   });
+  nav.addEventListener('keydown', (e) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    const b = e.target.closest('[data-set-tab]');
+    if (!step || !b) return;
+    e.preventDefault();
+    const next = SET_TABS[(SET_TABS.indexOf(b.dataset.setTab) + step + SET_TABS.length) % SET_TABS.length];
+    setTab(next);
+    $(`settab-${next}`).focus();
+  });
+  document.querySelector('.set-links').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-link]');
+    if (!b) return;
+    api.invoke('open_link', { link: b.dataset.link }).catch((err) => {
+      console.error('open_link', err);
+      toast(t('settings.openFailed'), { icon: 'x', autoHide: 5000 });
+    });
+  });
+  $('importopen').onclick = () => showImportSheet(true);
+  $('importback').onclick = () => { showImportSheet(false); $('importopen').focus(); };
   // A modal blocks the whole page: clicking the dimmed area outside it closes it.
   const box = $('settings');
   const outside = (e) => {
@@ -364,7 +440,14 @@ export function initSettings(c, { loadLibrary }) {
     return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
   };
   let pressedOutside = false;
-  box.addEventListener('mousedown', (e) => { pressedOutside = e.button === 0 && outside(e); });
+  box.addEventListener('cancel', (e) => {
+    if (rootMenu != null) { e.preventDefault(); rootMenu = null; renderRoots(); }
+    else if (!$('importsheet').hidden) { e.preventDefault(); showImportSheet(false); $('importopen').focus(); }
+  });
+  box.addEventListener('mousedown', (e) => {
+    pressedOutside = e.button === 0 && outside(e);
+    if (rootMenu != null && !e.target.closest('.set-pop, [data-root-more]')) { rootMenu = null; renderRoots(); }
+  });
   box.addEventListener('click', (e) => {
     if (pressedOutside && outside(e)) box.close();
     pressedOutside = false;
@@ -378,11 +461,11 @@ export function initSettings(c, { loadLibrary }) {
     e.target.checked = ly.netease;
     toast(t('lyrics.saveError'), { icon: 'x', autoHide: 6000 });
   });
-  $('closetraysw').onchange = (e) => {
-    const on = e.target.checked;
+  $('closesel').onchange = (e) => {
+    const on = e.target.value === 'tray';
     api.invoke('window_set_close_to_tray', { enabled: on }).catch((err) => {
       console.error('window_set_close_to_tray', err);
-      e.target.checked = !on;
+      e.target.value = on ? 'quit' : 'tray';
       toast(t('settings.closeToTrayError'), { icon: 'x', autoHide: 6000 });
     });
   };
@@ -397,8 +480,15 @@ export function initSettings(c, { loadLibrary }) {
   });
   $('refresh').onclick = () => startScan(true);
   $('rootlist').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-rm]');
-    if (b) removeRoot(+b.dataset.rm);
+    const more = e.target.closest('[data-root-more]');
+    if (more) {
+      const id = +more.dataset.rootMore;
+      rootMenu = rootMenu === id ? null : id;
+      renderRoots();
+      return;
+    }
+    const b = e.target.closest('[data-root-act]');
+    if (b) rootAction(b.dataset.rootAct, +b.dataset.id);
   });
   // sent by the scan thread right after probing the folders, before any progress
   api.listen('library://roots', (roots) => {

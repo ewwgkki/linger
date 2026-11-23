@@ -18,6 +18,7 @@
   <symbol id="i-disc" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.9l.1-.1a1.7 1.7 0 0 0-1.2-2.8H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.9-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.8v.1a1.7 1.7 0 0 0 1.5 1h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
@@ -92,7 +93,7 @@
       </div>
       <div class="top-actions">
         <button class="btn" id="refresh" type="button" data-i18n-title="top.refreshTip"><svg class="i"><use href="#i-refresh"/></svg><span class="txt" data-i18n="top.refresh"></span></button>
-        <button class="btn" id="opensettings" type="button" data-i18n-title="top.settingsTip"><svg class="i"><use href="#i-gear"/></svg><span class="txt" data-i18n="top.settings"></span></button>
+        <button class="btn" id="opensettings" type="button" data-i18n-title="top.settingsTip"><svg class="i"><use href="#i-gear"/></svg><span class="txt" data-i18n="top.settings"></span><span class="top-dot" id="topdot" data-i18n-title="update.dot" hidden></span></button>
       </div>
       <div class="mtabs"><div class="seg" id="mtabs">
         <button data-tab="songs" data-i18n="nav.songs"></button><button data-tab="artists" data-i18n="nav.artists"></button><button data-tab="albums" data-i18n="nav.albums"></button>
@@ -199,60 +200,50 @@
 </div>
 
 <dialog id="settings">
-  <form method="dialog" class="dlg" id="settingsform">
-    <div class="dlg-head"><h2 data-i18n="settings.title"></h2><button class="icon-btn" value="close" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button></div>
-    <div class="dlg-body">
-      <section>
-        <h3 data-i18n="settings.language"></h3>
-        <div class="seg" id="langseg" role="group" data-i18n-aria-label="settings.language"></div>
+  <form method="dialog" class="set" id="settingsform">
+    <nav class="set-nav" role="tablist" aria-orientation="vertical" data-i18n-aria-label="settings.title">
+      <h2 data-i18n="settings.title"></h2>
+      <button type="button" role="tab" id="settab-general" data-set-tab="general" aria-controls="setpane-general" aria-selected="true"><svg class="i"><use href="#i-sliders"/></svg><span data-i18n="settings.tab.general"></span></button>
+      <button type="button" role="tab" id="settab-library" data-set-tab="library" aria-controls="setpane-library" aria-selected="false" tabindex="-1"><svg class="i"><use href="#i-note"/></svg><span data-i18n="settings.tab.library"></span></button>
+      <button type="button" role="tab" id="settab-about" data-set-tab="about" aria-controls="setpane-about" aria-selected="false" tabindex="-1"><svg class="i"><use href="#i-info"/></svg><span data-i18n="settings.tab.about"></span><span class="set-dot" id="setdot" data-i18n-title="update.dot" hidden></span></button>
+    </nav>
+    <div class="set-main">
+      <button class="icon-btn set-x" value="close" data-i18n-aria-label="common.close"><svg class="i"><use href="#i-x"/></svg></button>
+
+      <section class="set-pane" id="setpane-general" role="tabpanel" aria-labelledby="settab-general">
+        <h3 data-i18n="settings.tab.general"></h3>
+        <div class="set-row"><label for="langsel" data-i18n="settings.language"></label><select class="set-select" id="langsel"></select></div>
+        <div class="set-row"><span data-i18n="settings.theme"></span><div class="seg" id="skinseg" role="group" data-i18n-aria-label="settings.theme"></div></div>
+        <div class="set-row"><label for="closesel" data-i18n="settings.closeAction"></label><select class="set-select" id="closesel"><option value="tray" data-i18n="settings.close.tray"></option><option value="quit" data-i18n="settings.close.quit"></option></select></div>
+        <div class="set-row"><div><label for="lyneteasesw" data-i18n="settings.netease"></label><p class="set-sub" data-i18n="lyrics.neteaseHint"></p></div><span class="set-sw"><input type="checkbox" role="switch" id="lyneteasesw"><i></i></span></div>
       </section>
-      <section>
-        <h3 data-i18n="settings.appearance"></h3>
-        <div class="seg" id="skinseg" role="group" data-i18n-aria-label="settings.appearance"></div>
-        <p class="hint" data-i18n="settings.appearanceHint"></p>
-      </section>
-      <section>
-        <h3 data-i18n="settings.window"></h3>
-        <label class="ly-switch"><input type="checkbox" id="closetraysw"><span data-i18n="settings.closeToTray"></span></label>
-        <p class="hint" data-i18n="settings.closeToTrayHint"></p>
-      </section>
-      <section>
-        <h3 data-i18n="top.folders"></h3>
-        <p class="hint" data-i18n="settings.intro"></p>
-        <div class="rootlist" id="rootlist"></div>
-        <div class="row">
-          <button class="btn primary" type="button" id="addfolder"><svg class="i"><use href="#i-folder"/></svg><span data-i18n="settings.addFolder"></span></button>
-          <span class="hint" id="rootsmsg"></span>
-        </div>
-      </section>
-      <section>
-        <h3 data-i18n="settings.scan"></h3>
-        <p class="hint" id="scaninfo"></p>
+
+      <section class="set-pane" id="setpane-library" role="tabpanel" aria-labelledby="settab-library" hidden>
+        <h3 data-i18n="settings.tab.library"></h3>
+        <div class="set-row slim"><span data-i18n="top.folders"></span><button class="btn" type="button" id="addfolder"><svg class="i"><use href="#i-new"/></svg><span data-i18n="settings.add"></span></button></div>
+        <p class="set-sub" id="rootsmsg" aria-live="polite"></p>
+        <div id="rootlist"></div>
+        <div class="set-row"><div><span data-i18n="settings.library"></span><p class="set-sub" id="scaninfo"></p></div><button class="btn" type="button" id="scanbtn"><span data-i18n="settings.startScan"></span></button></div>
         <div class="progress" id="scanprog" hidden><i></i></div>
-        <p class="hint" id="scanmsg" aria-live="polite"></p>
+        <p class="set-sub" id="scanmsg" aria-live="polite"></p>
         <details class="help" id="skipbox" hidden><summary id="skipsum"></summary><ul class="skips" id="skips"></ul></details>
-        <div class="row">
-          <button class="btn dark" type="button" id="scanbtn"><svg class="i"><use href="#i-refresh"/></svg><span data-i18n="settings.startScan"></span></button>
-        </div>
-        <p class="hint" data-i18n="settings.scanHint"></p>
-      </section>
-      <section id="importsec">
-        <h3 data-i18n="import.title"></h3>
-        <p class="hint" data-i18n="import.step1"></p>
-        <p class="hint" data-i18n="import.step2"></p>
-        <div class="row">
-          <button class="btn" type="button" id="importbtn"><svg class="i"><use href="#i-new"/></svg><span data-i18n="import.pick"></span></button>
-          <span class="hint" id="importmsg" aria-live="polite"></span>
+        <div class="set-row last"><span data-i18n="import.title"></span><button class="btn" type="button" id="importopen" data-i18n="settings.importOpen"></button></div>
+        <div class="set-sheet" id="importsheet" hidden>
+          <h3 data-i18n="import.title"></h3>
+          <p class="set-sub" data-i18n="import.step1"></p>
+          <p class="set-sub" data-i18n="import.step2"></p>
+          <p class="set-sub" id="importmsg" aria-live="polite"></p>
+          <div class="set-foot"><button class="btn" type="button" id="importback" data-i18n="dlg.cancel"></button><button class="btn primary" type="button" id="importbtn"><span data-i18n="import.pick"></span></button></div>
         </div>
       </section>
-      <section>
-        <h3 data-i18n="lyrics.title"></h3>
-        <label class="ly-switch"><input type="checkbox" id="lyneteasesw"><span data-i18n="lyrics.netease"></span></label>
-        <p class="hint" data-i18n="lyrics.neteaseHint"></p>
-      </section>
-      <section>
-        <h3 data-i18n="settings.ffmpeg"></h3>
-        <p class="hint" id="ffmpeginfo"></p>
+
+      <section class="set-pane" id="setpane-about" role="tabpanel" aria-labelledby="settab-about" hidden>
+        <h3 data-i18n="settings.tab.about"></h3>
+        <div class="set-brand"><span class="set-mark" aria-hidden="true"><i></i></span><div><b data-i18n="settings.brand"></b><p class="set-sub" id="setversion"></p></div></div>
+        <div class="upd-card" id="updcard" aria-live="polite"></div>
+        <div class="set-row"><div><label for="updautosw" data-i18n="update.auto"></label><p class="set-sub" data-i18n="update.autoHint"></p></div><span class="set-sw"><input type="checkbox" role="switch" id="updautosw"><i></i></span></div>
+        <div class="set-row" id="ffmpegrow" hidden><p class="set-sub set-bad" id="ffmpeginfo"></p></div>
+        <div class="set-links"><button type="button" data-link="home" data-i18n="settings.github"></button><button type="button" data-link="licenses" data-i18n="settings.licenses"></button></div>
       </section>
     </div>
   </form>

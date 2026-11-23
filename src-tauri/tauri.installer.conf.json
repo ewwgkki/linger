@@ -4,6 +4,7 @@
       "binaries/installer/ffmpeg.exe": "ffmpeg.exe",
       "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
       "../licenses/FFmpeg-LGPL-2.1.txt": "licenses/FFmpeg-LGPL-2.1.txt"
-    }
+    },
+    "createUpdaterArtifacts": true
   }
 }

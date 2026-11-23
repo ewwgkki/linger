@@ -8,6 +8,7 @@ import { renderShelf } from './views/shelf.js';
 import { renderPlaylist, defaultPlSort } from './views/playlist.js';
 import { initPlayer, playList, markRows, libraryChanged, showSaved } from './player.js';
 import { initSettings, openSettings, openImport, startScan, toast } from './settings.js';
+import { initUpdate } from './update.js';
 import { enterPage, sortScope, rememberedSort, pruneSorts } from './filters.js';
 import { pl, FAV, initPlaylists, loadItems, createPlaylist, renamePlaylist, deletePlaylist, errKey } from './playlists.js';
 import { askName, confirmBox } from './dialogs.js';
@@ -47,7 +48,7 @@ export const ctx = {
   sidebar: () => sidebar(),
   /** Plays `list` (already filtered to playable songs) from `start`. */
   playList: (list, start, shuffle) => playList(list, start, shuffle),
-  openSettings: () => { closeDrawer(); openSettings(); },
+  openSettings: (tab) => { closeDrawer(); openSettings(tab); },
   reloadLibrary: () => loadLibrary(),
   openImport: () => { closeDrawer(); openImport(); },
   openPlaylist: (id) => openPlaylist(id),
@@ -530,6 +531,7 @@ async function boot() {
   state.tab = h.tab; state.pl = h.pl;
   state.plSort = isPlTab(state.tab) ? plSortFor(state.tab, state.pl) : null;
   initSettings(ctx, { loadLibrary });
+  initUpdate();
   const plReady = initPlaylists(ctx);
   try {
     await loadLibrary();

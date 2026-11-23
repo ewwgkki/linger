@@ -128,6 +128,8 @@ pub struct ScanFinished {
     /// songs in the whole library
     pub count: usize,
     pub skipped: Vec<Skipped>,
+    /// files followed to a new name
+    pub renamed: usize,
     /// the folder this pass covered (`None` = all folders)
     pub root: Option<i64>,
 }
@@ -301,7 +303,7 @@ fn scan_pass(app: &AppHandle, state: &AppState) {
     if state.db().relink_missing().unwrap_or(0) > 0 {
         let _ = app.emit("playlists://changed", super::playlists::PlaylistsChanged { id: None, favorites: true });
     }
-    let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped, root: only });
+    let _ = app.emit("scan://finished", ScanFinished { count: rep.count, skipped: rep.skipped, renamed: rep.renamed, root: only });
 }
 
 pub fn spawn_scan(app: AppHandle) {
@@ -329,6 +331,19 @@ fn spawn_scan_for(app: AppHandle, root: Option<i64>) {
     if spawned.is_err() {
         app.state::<AppState>().scan.abort();
     }
+}
+
+/// Shows a music folder in File Explorer. Only folders already in the library can be opened.
+#[tauri::command(async)]
+pub fn open_root(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    let roots = state.db().roots().map_err(|e| e.to_string())?;
+    let root = roots.into_iter().find(|r| r.id == id).ok_or("settings.openFailed")?;
+    if !Path::new(&root.path).is_dir() {
+        return Err("settings.openFailed".into());
+    }
+    #[cfg(windows)]
+    std::process::Command::new("explorer").arg(&root.path).spawn().map_err(|_| "settings.openFailed")?;
+    Ok(())
 }
 
 /// Swaps title and artist for songs the automatic rule got wrong. Files are not changed.

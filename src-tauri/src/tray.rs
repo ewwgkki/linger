@@ -310,6 +310,28 @@ fn first_close_hint(app: &AppHandle) {
     });
 }
 
+/// Gets ready for the process to end: stops playback and removes the tray icon.
+pub fn prepare_exit(app: &AppHandle) {
+    if let Some(t) = app.try_state::<Tray>() {
+        t.quitting.store(true, Ordering::SeqCst);
+        let _ = t.icon.set_visible(false);
+    }
+    let state = app.state::<AppState>();
+    state.player.shutdown();
+    let locked = state.db.try_lock();
+    if let Ok(db) = &locked {
+        let _ = db.checkpoint();
+    }
+}
+
+/// The exit did not happen (a failed update): the app keeps running.
+pub fn cancel_exit(app: &AppHandle) {
+    if let Some(t) = app.try_state::<Tray>() {
+        t.quitting.store(false, Ordering::SeqCst);
+        let _ = t.icon.set_visible(true);
+    }
+}
+
 /// Really exits: stops playback (and any FFmpeg child) first.
 pub fn quit(app: &AppHandle) {
     let Some(t) = app.try_state::<Tray>() else {

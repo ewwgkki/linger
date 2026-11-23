@@ -15,6 +15,25 @@ fn parse_install_language(text: &str) -> Option<&'static str> {
     }
 }
 
+/// Opens one of Linger's own pages in the default browser. The page cannot navigate by itself.
+#[tauri::command(async)]
+pub fn open_link(link: String) -> Result<(), String> {
+    let url = link_url(&link).ok_or("settings.openFailed")?;
+    #[cfg(windows)]
+    std::process::Command::new("explorer").arg(url).spawn().map_err(|_| "settings.openFailed")?;
+    #[cfg(not(windows))]
+    let _ = url;
+    Ok(())
+}
+
+fn link_url(link: &str) -> Option<&'static str> {
+    match link {
+        "home" => Some("https://github.com/ewwgkki/linger"),
+        "licenses" => Some("https://github.com/ewwgkki/linger/blob/main/THIRD-PARTY-NOTICES.md"),
+        _ => None,
+    }
+}
+
 /// The language picked in the installer, if this is the first start since then.
 #[tauri::command(async)]
 pub fn take_installer_language(state: State<'_, AppState>) -> Option<String> {
@@ -45,6 +64,13 @@ mod tests {
         assert_eq!(parse_install_language(" en\r\n"), Some("en"));
         assert_eq!(parse_install_language("fr"), None);
         assert_eq!(parse_install_language(""), None);
+    }
+
+    #[test]
+    fn only_known_links_open() {
+        assert!(link_url("home").is_some());
+        assert!(link_url("licenses").is_some());
+        assert_eq!(link_url("https://example.com"), None);
     }
 
     #[test]

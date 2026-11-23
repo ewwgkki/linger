@@ -318,6 +318,22 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    open_link: ({ link }) => { globalThis.__lastLink = link; },
+    open_root: ({ id }) => { globalThis.__lastOpenRoot = id; },
+    update_settings: () => ({ auto: globalThis.__updAuto !== false, version: '0.6.0' }),
+    update_set_auto: ({ enabled }) => { globalThis.__updAuto = !!enabled; },
+    update_check: () => (new URLSearchParams(location.search).get('upd') === '1' ? { version: '0.7.0', notes: 'A cleaner Settings window\nIn-app updates' } : null),
+    update_download: () => {
+      let pct = 0;
+      clearInterval(globalThis.__updTimer);
+      globalThis.__updTimer = setInterval(() => {
+        pct += 25;
+        emit('update://progress', { pct });
+        if (pct >= 100) { clearInterval(globalThis.__updTimer); emit('update://ready', null); }
+      }, 70);
+    },
+    update_cancel: () => clearInterval(globalThis.__updTimer),
+    update_install: () => { globalThis.__updInstalled = true; },
     swap_title_artist: ({ songIds }) => {
       let n = 0;
       for (const s of lib.songs) if (songIds.includes(s.id) && s.a) { [s.t, s.a] = [s.a, s.t]; n++; }
