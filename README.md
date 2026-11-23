@@ -8,11 +8,16 @@ An ad-free local music player for Windows: play your own music from local disks 
 
 ## Screenshots / 截图
 
-![Full-screen player with synced lyrics](assets/screenshots/now-playing.png)
-
-| Library and play queue / 音乐库和播放队列 | Chinese interface with lyrics / 中文界面和歌词 |
-|---|---|
-| ![Library in dark mode](assets/screenshots/library-dark.png) | ![Chinese interface with lyrics](assets/screenshots/lyrics-zh.png) |
+<table>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/fresh-library.png" width="100%" alt="Fresh theme library"><br><sub>Fresh theme / 小清新主题</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/fresh-lyrics.png" width="100%" alt="Fresh theme full-screen lyrics"><br><sub>Full-screen lyrics / 全屏歌词</sub></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><img src="assets/screenshots/fresh-dark.png" width="100%" alt="Fresh theme in dark mode"><br><sub>Fresh dark mode / 小清新深色模式</sub></td>
+    <td width="50%" align="center"><img src="assets/screenshots/classic-library.png" width="100%" alt="Classic theme library"><br><sub>Classic theme / 经典主题</sub></td>
+  </tr>
+</table>
 
 Screenshots use made-up demo songs. / 截图中的歌曲均为虚构示例。
 
@@ -35,6 +40,8 @@ Run the installer and choose a folder. No administrator rights are needed, and W
 - Synced karaoke-style lyrics and a full-screen play page / 卡拉 OK 式滚动歌词和全屏播放页
 - Lyrics from embedded tags, `.lrc` files, LRCLIB and NetEase / 歌词来自内嵌标签、`.lrc`、LRCLIB 和网易云
 - Keeps playing in the system tray when the window is closed / 关闭窗口后在系统托盘继续播放
+- Classic and Fresh themes, each with light and dark modes / 经典和小清新两种主题，均支持浅色和深色
+- Reads both "Artist - Title" and "Title - Artist" file names / 自动识别“歌手 - 歌名”和“歌名 - 歌手”两种文件名
 - English and Simplified Chinese: choose during installation or in Settings / 支持英文和简体中文，可在安装时或设置中选择
 - No ads, no accounts, and your music files are never modified / 无广告、无需账号、绝不修改音乐文件
 
