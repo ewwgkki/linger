@@ -80,24 +80,24 @@ impl Provider for Lrclib {
     }
 
     fn best(&self, q: &Query) -> Result<Option<Raw>, NetError> {
-        if !super::online::has_artist(q) {
-            return Ok(None);
+        if super::online::has_artist(q) {
+            let dur = (q.duration.round() as i64).to_string();
+            let mut params = vec![("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
+            if !q.album.is_empty() {
+                params.push(("album_name", q.album.as_str()));
+            }
+            if q.duration > 0.0 {
+                params.push(("duration", dur.as_str()));
+            }
+            if let Some(body) = http_get(&format!("{BASE}/get"), &params, &[("User-Agent", UA)])? {
+                shape_ok(&body, false)?;
+                if let Some(raw) = parse_track(&body) {
+                    return Ok(Some(raw));
+                }
+            }
         }
-        let dur = (q.duration.round() as i64).to_string();
-        let mut params = vec![("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
-        if !q.album.is_empty() {
-            params.push(("album_name", q.album.as_str()));
-        }
-        if q.duration > 0.0 {
-            params.push(("duration", dur.as_str()));
-        }
-        if let Some(body) = http_get(&format!("{BASE}/get"), &params, &[("User-Agent", UA)])? {
-            shape_ok(&body, false)?;
-            return Ok(parse_track(&body));
-        }
-        // 404: fall back to search + strict match
-        let cands = self.search(q)?;
-        match super::online::pick_best(&cands, q) {
+        // no exact entry: search and match on title and length
+        match super::online::pick_auto(q, &|x| self.search(x))? {
             Some(c) => self.fetch(&c.ext_id),
             None => Ok(None),
         }

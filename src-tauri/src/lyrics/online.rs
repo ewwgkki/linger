@@ -6,6 +6,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 const MAX_BODY: u64 = 2 * 1024 * 1024;
+const NO_ARTIST_TOLERANCE: f64 = 2.0;
+const MISMATCH_TOLERANCE: f64 = 1.5;
+const SHORT_TITLE_TOLERANCE: f64 = 1.0;
 
 #[derive(Debug, Clone)]
 pub struct Query {
@@ -105,7 +108,7 @@ pub fn http_post_form(
     finish(req.send_form(form))
 }
 
-/// Auto-match needs an artist.
+/// LRCLIB's exact lookup needs an artist.
 pub fn has_artist(q: &Query) -> bool {
     !q.artist.trim().is_empty()
 }
@@ -133,7 +136,7 @@ pub fn pick_best<'a>(cands: &'a [Candidate], q: &Query) -> Option<&'a Candidate>
             continue;
         }
         let ca = split_artists(&c.artist);
-        if !ca.iter().any(|a| qa.contains(a)) {
+        if !ca.iter().any(|a| qa.contains(a)) && !same_compact(&c.artist, &q.artist) {
             continue;
         }
         let diff = (c.dur - q.duration).abs();
@@ -156,6 +159,53 @@ pub fn pick_best<'a>(cands: &'a [Candidate], q: &Query) -> Option<&'a Candidate>
         }
     }
     best.map(|(c, _)| c)
+}
+
+/// "ImagineDragons" and "Imagine Dragons" are the same name.
+fn same_compact(a: &str, b: &str) -> bool {
+    let key = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    let (a, b) = (key(a), key(b));
+    !a.is_empty() && a == b
+}
+
+/// For a missing or differently written artist (Eagles / 老鹰乐队): the title must be equal and the
+/// length must agree closely, more closely still for one-character titles.
+pub fn pick_relaxed<'a>(cands: &'a [Candidate], q: &Query) -> Option<&'a Candidate> {
+    let qt = norm_title(&q.title);
+    if qt.is_empty() || q.duration <= 0.0 {
+        return None;
+    }
+    let base = if has_artist(q) { MISMATCH_TOLERANCE } else { NO_ARTIST_TOLERANCE };
+    let tolerance = if qt.chars().count() <= 1 { base.min(SHORT_TITLE_TOLERANCE) } else { base };
+    let mut best: Option<(&Candidate, f64)> = None;
+    for c in cands {
+        let diff = (c.dur - q.duration).abs();
+        if is_cover(&c.title) || norm_title(&c.title) != qt || c.dur <= 0.0 || diff > tolerance {
+            continue;
+        }
+        let better = best.is_none_or(|(b, bd)| if c.synced != b.synced { c.synced } else { diff < bd });
+        if better {
+            best = Some((c, diff));
+        }
+    }
+    best.map(|(c, _)| c)
+}
+
+/// The automatic choice: exact match first, then title and length, then a title-only search.
+pub fn pick_auto(q: &Query, search: &dyn Fn(&Query) -> Result<Vec<Candidate>, NetError>) -> Result<Option<Candidate>, NetError> {
+    if q.title.trim().is_empty() {
+        return Ok(None);
+    }
+    let cands = search(q)?;
+    if let Some(c) = pick_best(&cands, q).or_else(|| pick_relaxed(&cands, q)) {
+        return Ok(Some(c.clone()));
+    }
+    if !has_artist(q) {
+        return Ok(None);
+    }
+    let title_only = Query { artist: String::new(), ..q.clone() };
+    let cands = search(&title_only)?;
+    Ok(pick_best(&cands, q).or_else(|| pick_relaxed(&cands, q)).cloned())
 }
 
 #[cfg(test)]
@@ -267,6 +317,63 @@ mod tests {
         assert!(has_artist(&q("A", "B", 1.0)));
         assert!(!has_artist(&q("A", "", 1.0)));
         assert!(!has_artist(&q("A", "  ", 1.0)));
+    }
+
+    #[test]
+    fn missing_artist_matches_on_title_and_length() {
+        let c = [cand("蚀月", "某歌手", 293.0, true, "1"), cand("蚀月", "另一位", 240.0, true, "2")];
+        assert_eq!(pick_relaxed(&c, &q("蚀月", "", 293.4)).unwrap().ext_id, "1");
+        assert!(pick_relaxed(&c, &q("蚀月", "", 280.0)).is_none());
+        assert!(pick_relaxed(&c, &q("蚀月", "", 0.0)).is_none());
+    }
+
+    #[test]
+    fn translated_artist_needs_a_closer_length() {
+        let c = [cand("Hotel California", "老鹰乐队", 391.0, true, "1")];
+        assert!(pick_relaxed(&c, &q("Hotel California", "Eagles", 392.0)).is_some());
+        assert!(pick_relaxed(&c, &q("Hotel California", "Eagles", 393.0)).is_none());
+    }
+
+    #[test]
+    fn one_character_titles_are_stricter() {
+        let c = [cand("爱", "A", 200.0, true, "1")];
+        assert!(pick_relaxed(&c, &q("爱", "", 200.9)).is_some());
+        assert!(pick_relaxed(&c, &q("爱", "", 201.5)).is_none());
+    }
+
+    #[test]
+    fn relaxed_match_never_takes_a_cover_or_other_title() {
+        let c = [cand("晴天 (Cover)", "X", 269.0, true, "1"), cand("雨天", "X", 269.0, true, "2")];
+        assert!(pick_relaxed(&c, &q("晴天", "", 269.0)).is_none());
+    }
+
+    #[test]
+    fn spacing_in_an_artist_name_does_not_matter() {
+        let c = [cand("Believer", "Imagine Dragons", 204.0, true, "1")];
+        assert!(pick_best(&c, &q("Believer", "ImagineDragons", 204.0)).is_some());
+    }
+
+    #[test]
+    fn auto_pick_falls_back_to_a_title_search() {
+        use std::cell::RefCell;
+        let asked = RefCell::new(Vec::new());
+        let search = |x: &Query| {
+            asked.borrow_mut().push(x.artist.clone());
+            Ok(if x.artist.is_empty() { vec![cand("A", "译名", 200.0, true, "9")] } else { vec![] })
+        };
+        assert_eq!(pick_auto(&q("A", "Name", 200.0), &search).unwrap().unwrap().ext_id, "9");
+        assert_eq!(*asked.borrow(), vec!["Name".to_string(), String::new()]);
+    }
+
+    #[test]
+    fn auto_pick_stops_at_an_exact_match_and_reports_errors() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let found = |_: &Query| { calls.set(calls.get() + 1); Ok(vec![cand("A", "B", 200.0, true, "1")]) };
+        assert_eq!(pick_auto(&q("A", "B", 200.0), &found).unwrap().unwrap().ext_id, "1");
+        assert_eq!(calls.get(), 1);
+        let down = |_: &Query| Err(NetError);
+        assert_eq!(pick_auto(&q("A", "B", 200.0), &down), Err(NetError));
     }
 
     #[test]

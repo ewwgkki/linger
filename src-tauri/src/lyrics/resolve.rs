@@ -7,6 +7,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 pub const NONE_TTL_SECS: i64 = 7 * 24 * 3600;
+/// Bumped when auto-matching improves, so earlier "no lyrics" answers are looked up again.
+const MATCH_RULES: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
@@ -52,6 +54,7 @@ fn none_key(song: &SongRow, providers: &[&dyn Provider]) -> String {
         song.album.trim().to_lowercase(),
         (song.duration.round() as i64).to_string(),
         names.join(","),
+        MATCH_RULES.to_string(),
     ].join("\0");
     sha1_smol::Sha1::from(text).digest().to_string()[..16].to_string()
 }
