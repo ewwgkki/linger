@@ -1,6 +1,6 @@
 [package]
 name = "linger"
-version = "0.6.1"
+version = "0.7.0"
 description = "Linger · 余音 — an ad-free local music player"
 authors = ["ewwgkki"]
 license = "GPL-3.0-or-later"
@@ -32,6 +32,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
+
+[target."cfg(windows)".dependencies]
+souvlaki = { version = "0.9.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

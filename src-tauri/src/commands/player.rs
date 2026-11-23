@@ -95,6 +95,15 @@ pub fn load_settings(db: &Db) -> (bool, Repeat, u8) {
     (shuffle, repeat, volume)
 }
 
+/// What the system media overlay shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaStatus {
+    pub id: Option<String>,
+    pub playing: bool,
+    pub pos: f64,
+    pub duration: f64,
+}
+
 pub struct Player {
     engine: OnceLock<Engine>,
     inner: Mutex<Inner>,
@@ -133,6 +142,10 @@ impl Player {
             engine: OnceLock::new(),
             inner: Mutex::new(Inner::new(queue, volume)),
         }
+    }
+    pub fn media_status(&self) -> MediaStatus {
+        let i = self.inner();
+        MediaStatus { id: i.id.clone(), playing: i.playing, pos: i.pos, duration: i.dur }
     }
     /// Current song id and whether it is playing.
     pub fn status(&self) -> (Option<String>, bool) {
@@ -194,6 +207,7 @@ fn dto(i: &Inner) -> PlayerStateDto {
 fn emit_state(app: &AppHandle, i: &Inner) {
     let _ = app.emit("player://state", dto(i));
     crate::tray::notify(app);
+    crate::media::notify(app);
 }
 
 /// The queue view changed (no payload; the UI re-fetches `player_queue`).

@@ -1,5 +1,6 @@
 pub mod import;
 pub mod lyrics;
+pub mod media;
 pub mod naming;
 pub mod commands;
 pub mod cover;
@@ -53,6 +54,7 @@ pub fn run() {
             app.manage(state::AppState::new(db, data_dir));
             app.manage(update::UpdateState::default());
             commands::player::init(app.handle());
+            media::init(app.handle());
             if let Err(e) = tray::init(app.handle()) {
                 eprintln!("linger: cannot create tray icon: {e}");
             }
