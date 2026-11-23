@@ -218,7 +218,7 @@ mod tests {
 
     fn lib(db: &mut Db) -> Vec<String> {
         let r = db.add_root("D:/m").unwrap();
-        let m = FileMeta { rel: "x.flac".into(), ext: "flac".into(), size: 7, mtime: 1, codec: "flac".into(),
+        let m = FileMeta { tag_title: String::new(), tag_artist: String::new(), rel: "x.flac".into(), ext: "flac".into(), size: 7, mtime: 1, codec: "flac".into(),
             bitrate: 900, duration: 10.0, cover: 0, cue_sig: None };
         let s = |t: &str, a: &str, st: u64, d: f64| NewSong { id: song_id("D:/m", "x.flac", st), title: t.into(),
             artist: a.into(), album: "B".into(), track: 1, start_ms: st, end_ms: None, duration: d };

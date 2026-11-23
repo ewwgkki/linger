@@ -303,6 +303,7 @@ details.help .hint{margin-top:8px}
 .side-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding-right:4px}
 .side-h h4{margin:0}
 .side-add{width:26px;height:26px;border-radius:7px;border:0;background:none;color:var(--muted);cursor:pointer;display:grid;place-items:center;padding:0}
+#qtoggle{display:none}
 .side-add:hover{background:var(--surface-2);color:var(--ink)}
 .side-add svg.i{width:16px;height:16px}
 .side-empty{margin:0;padding:4px 10px;font-size:13px;color:var(--faint)}

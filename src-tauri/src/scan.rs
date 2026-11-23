@@ -320,6 +320,37 @@ fn gone_files(sigs: &HashMap<String, FileSig>, seen: &HashSet<String>, failed: &
         .collect()
 }
 
+/// Stored files that vanished, paired with new files of the same type, size and modification
+/// time. A pair is used only when it is unambiguous.
+fn match_renames(sigs: &HashMap<String, FileSig>, w: &Walk) -> Vec<(String, String)> {
+    let disk: Vec<(String, u64, i64)> = w.dirs.iter()
+        .flat_map(|(d, df)| df.audio.iter().map(move |a| (join_rel(d, &a.name), a.size, a.mtime)))
+        .collect();
+    let seen: HashSet<String> = disk.iter().map(|d| d.0.clone()).collect();
+    let ext = |rel: &str| rel.rsplit('.').next().unwrap_or("").to_lowercase();
+    let mut gone: HashMap<(String, u64, i64), Vec<String>> = HashMap::new();
+    for rel in gone_files(sigs, &seen, &w.failed) {
+        let s = &sigs[&rel];
+        if s.cue_sig.is_none() {
+            gone.entry((ext(&rel), s.size, s.mtime)).or_default().push(rel);
+        }
+    }
+    let mut new: HashMap<(String, u64, i64), Vec<String>> = HashMap::new();
+    for (rel, size, mtime) in disk {
+        if !sigs.contains_key(&rel) {
+            new.entry((ext(&rel), size, mtime)).or_default().push(rel);
+        }
+    }
+    let mut pairs: Vec<(String, String)> = gone.into_iter()
+        .filter_map(|(k, old)| match (old.as_slice(), new.get(&k).map(Vec::as_slice)) {
+            ([o], Some([n])) => Some((o.clone(), n.clone())),
+            _ => None,
+        })
+        .collect();
+    pairs.sort();
+    pairs
+}
+
 fn display(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
@@ -343,6 +374,15 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
         }
         let mut sigs: HashMap<String, FileSig> = HashMap::new();
         with(&mut |db| sigs = db.file_sigs(root.id).unwrap_or_default());
+        let renames = match_renames(&sigs, w);
+        if !renames.is_empty() {
+            with(&mut |db| {
+                for (old, new) in &renames {
+                    let _ = db.rename_file(root.id, &root.path, old, new);
+                }
+                sigs = db.file_sigs(root.id).unwrap_or_default();
+            });
+        }
         let mut seen: HashSet<String> = HashSet::new();
         let mut root_lost = false;
 
@@ -355,7 +395,8 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
             // Parse CUEs only when some file here may have changed.
             let trivially_same = |a: &Entry, rel: &str| {
                 sigs.get(rel).is_some_and(|s| {
-                    s.size == a.size
+                    s.tags_known
+                        && s.size == a.size
                         && s.mtime == a.mtime
                         && match &s.cue_sig {
                             None => df.cues.is_empty(),
@@ -377,7 +418,7 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
                     true
                 } else {
                     sigs.get(&rel).is_some_and(|s| {
-                        s.size == a.size && s.mtime == a.mtime && s.cue_sig.as_ref() == cue.map(|c| &c.1)
+                        s.tags_known && s.size == a.size && s.mtime == a.mtime && s.cue_sig.as_ref() == cue.map(|c| &c.1)
                     })
                 };
                 let abs = abs_path(root_path, &rel);
@@ -415,6 +456,8 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
                             duration: info.duration,
                             cover: pc,
                             cue_sig: cue.map(|c| c.1.clone()),
+                            tag_title: info.title.clone(),
+                            tag_artist: if info.artist.is_empty() { info.albumartist.clone() } else { info.artist.clone() },
                         };
                         let songs = build_songs(root, &rel, &info, cue.map(|c| &c.0));
                         let mut ok = true;
@@ -450,7 +493,10 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
         }
     }
     progress(Progress { done, total });
-    with(&mut |db| rep.count = db.song_count().unwrap_or(0));
+    with(&mut |db| {
+        let _ = db.apply_names();
+        rep.count = db.song_count().unwrap_or(0);
+    });
     rep
 }
 
@@ -719,7 +765,7 @@ mod tests {
 
     #[test]
     fn gone_files_respects_failed_dirs() {
-        let sig = FileSig { id: 1, size: 1, mtime: 1, cue_sig: None };
+        let sig = FileSig { id: 1, size: 1, mtime: 1, cue_sig: None, tags_known: true };
         let sigs: HashMap<String, FileSig> = ["a/x.mp3", "a/b/y.mp3", "ab/z.mp3", "c.mp3", "d.mp3"]
             .into_iter()
             .map(|r| (r.to_string(), sig.clone()))
@@ -729,6 +775,23 @@ mod tests {
         gone.sort();
         assert_eq!(gone, ["ab/z.mp3", "c.mp3"]);
         assert!(gone_files(&sigs, &seen, &[String::new()]).is_empty());
+    }
+
+    #[test]
+    fn rename_is_followed_and_name_order_is_rederived() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("music");
+        put(&root, "Artist - Song.mp3", &mp3("Song"));
+        let (mut db, roots, on) = setup(&root);
+        run(&mut db, &roots, &on);
+        let old = db.all_songs().unwrap()[0].id.clone();
+        db.set_favorites(std::slice::from_ref(&old), true, 1).unwrap();
+        std::fs::rename(root.join("Artist - Song.mp3"), root.join("Song - Artist.mp3")).unwrap();
+        run(&mut db, &roots, &on);
+        let songs = db.all_songs().unwrap();
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].rel, "Song - Artist.mp3");
+        assert_eq!(db.favorites().unwrap()[0].song_id, songs[0].id);
     }
 
     #[test]

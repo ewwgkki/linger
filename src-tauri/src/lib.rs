@@ -1,5 +1,6 @@
 pub mod import;
 pub mod lyrics;
+pub mod naming;
 pub mod commands;
 pub mod cover;
 pub mod cue;
@@ -64,6 +65,7 @@ pub fn run() {
             commands::library::add_roots,
             commands::library::remove_root,
             commands::library::start_scan,
+            commands::library::swap_title_artist,
             commands::player::player_play_list,
             commands::player::player_toggle,
             commands::player::player_next,

@@ -21,11 +21,12 @@ pub type Result<T> = std::result::Result<T, DbError>;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Root { pub id: i64, pub path: String }
 #[derive(Debug, Clone, PartialEq)]
-pub struct FileSig { pub id: i64, pub size: u64, pub mtime: i64, pub cue_sig: Option<String> }
+pub struct FileSig { pub id: i64, pub size: u64, pub mtime: i64, pub cue_sig: Option<String>, pub tags_known: bool }
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileMeta {
     pub rel: String, pub ext: String, pub size: u64, pub mtime: i64, pub codec: String,
     pub bitrate: u32, pub duration: f64, pub cover: u8, pub cue_sig: Option<String>,
+    pub tag_title: String, pub tag_artist: String,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewSong {
@@ -80,6 +81,12 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE lyrics(song_id TEXT PRIMARY KEY, status TEXT NOT NULL, source TEXT, ext_id TEXT,
        lrc TEXT, yrc TEXT, trans TEXT, plain TEXT, pinned INTEGER NOT NULL DEFAULT 0, fetched INTEGER NOT NULL);
      CREATE TABLE lyrics_offset(song_id TEXT PRIMARY KEY, offset_ms INTEGER NOT NULL);",
+    // v5: raw tags for working out file-name order (NULL until the file is read again),
+    // and titles/artists the user swapped by hand.
+    "ALTER TABLE files ADD COLUMN tag_title TEXT;
+     ALTER TABLE files ADD COLUMN tag_artist TEXT;
+     CREATE TABLE name_overrides(song_id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT NOT NULL,
+       orig_title TEXT NOT NULL, orig_artist TEXT NOT NULL);",
 ];
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -169,6 +176,17 @@ fn fav_remove(c: &Connection, song_ids: &[String]) -> Result<usize> {
     Ok(n)
 }
 fn norm(s: &str) -> String { s.trim().to_lowercase() }
+/// Updates a song's names and the snapshots that playlists and favorites keep of it.
+fn write_names(c: &Connection, id: &str, title: &str, artist: &str) -> rusqlite::Result<()> {
+    for sql in [
+        "UPDATE songs SET title=?2, artist=?3 WHERE id=?1",
+        "UPDATE playlist_items SET title=?2, artist=?3 WHERE song_id=?1",
+        "UPDATE favorites SET title=?2, artist=?3 WHERE song_id=?1",
+    ] {
+        c.execute(sql, [id, title, artist])?;
+    }
+    Ok(())
+}
 /// Moves a lost song's lyric row and offset to its new id. A pinned row or an offset already on the
 /// target stays; a pinned row replaces an unpinned one.
 fn move_lyric_rows(c: &Connection, old: &str, new: &str) -> rusqlite::Result<()> {
@@ -276,10 +294,10 @@ impl Db {
         Ok(())
     }
     pub fn file_sigs(&self, root_id: i64) -> Result<HashMap<String, FileSig>> {
-        let mut st = self.conn.prepare("SELECT rel, id, size, mtime, cue_sig FROM files WHERE root_id=?1")?;
+        let mut st = self.conn.prepare("SELECT rel, id, size, mtime, cue_sig, tag_title IS NOT NULL FROM files WHERE root_id=?1")?;
         let rows = st.query_map([root_id], |r| {
             Ok((r.get::<_, String>(0)?, FileSig {
-                id: r.get(1)?, size: r.get::<_, i64>(2)? as u64, mtime: r.get(3)?, cue_sig: r.get(4)?,
+                id: r.get(1)?, size: r.get::<_, i64>(2)? as u64, mtime: r.get(3)?, cue_sig: r.get(4)?, tags_known: r.get(5)?,
             }))
         })?;
         Ok(rows.collect::<std::result::Result<HashMap<_, _>, _>>()?)
@@ -287,12 +305,13 @@ impl Db {
     pub fn replace_file(&mut self, root_id: i64, m: &FileMeta, songs: &[NewSong]) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO files(root_id, rel, ext, size, mtime, codec, bitrate, duration, cover, cue_sig)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
+            "INSERT INTO files(root_id, rel, ext, size, mtime, codec, bitrate, duration, cover, cue_sig, tag_title, tag_artist)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
              ON CONFLICT(root_id, rel) DO UPDATE SET ext=excluded.ext, size=excluded.size,
                mtime=excluded.mtime, codec=excluded.codec, bitrate=excluded.bitrate,
-               duration=excluded.duration, cover=excluded.cover, cue_sig=excluded.cue_sig",
-            params![root_id, m.rel, m.ext, m.size as i64, m.mtime, m.codec, m.bitrate, m.duration, m.cover, m.cue_sig],
+               duration=excluded.duration, cover=excluded.cover, cue_sig=excluded.cue_sig,
+               tag_title=excluded.tag_title, tag_artist=excluded.tag_artist",
+            params![root_id, m.rel, m.ext, m.size as i64, m.mtime, m.codec, m.bitrate, m.duration, m.cover, m.cue_sig, m.tag_title, m.tag_artist],
         )?;
         let file_id: i64 = tx.query_row(
             "SELECT id FROM files WHERE root_id=?1 AND rel=?2", params![root_id, m.rel], |r| r.get(0))?;
@@ -308,6 +327,102 @@ impl Db {
         }
         tx.commit()?;
         Ok(())
+    }
+    /// Follows a renamed single-song file: playlists, favorites, lyrics and overrides keep working.
+    /// Returns false when the old file is not a single song or the new name is taken.
+    pub fn rename_file(&mut self, root_id: i64, root_path: &str, old_rel: &str, new_rel: &str) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let file: Option<i64> = tx.query_row(
+            "SELECT id FROM files WHERE root_id=?1 AND rel=?2 AND cue_sig IS NULL", params![root_id, old_rel], |r| r.get(0))
+            .optional()?;
+        let Some(file_id) = file else { return Ok(false) };
+        let taken: i64 = tx.query_row("SELECT count(*) FROM files WHERE root_id=?1 AND rel=?2", params![root_id, new_rel], |r| r.get(0))?;
+        let songs: Vec<(String, i64)> = {
+            let mut st = tx.prepare("SELECT id, start_ms FROM songs WHERE file_id=?1")?;
+            let v = st.query_map([file_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            v
+        };
+        let [(old_id, 0)] = songs.as_slice() else { return Ok(false) };
+        if taken > 0 {
+            return Ok(false);
+        }
+        let new_id = song_id(root_path, new_rel, 0);
+        // the song is read again in this scan, so its name follows the new file name
+        tx.execute("UPDATE files SET rel=?2, tag_title=NULL, tag_artist=NULL WHERE id=?1", params![file_id, new_rel])?;
+        tx.execute("UPDATE songs SET id=?2 WHERE id=?1", [old_id, &new_id])?;
+        for sql in [
+            "UPDATE OR IGNORE playlist_items SET song_id=?2 WHERE song_id=?1",
+            "UPDATE OR IGNORE favorites SET song_id=?2 WHERE song_id=?1",
+            "UPDATE OR IGNORE name_overrides SET song_id=?2 WHERE song_id=?1",
+        ] {
+            tx.execute(sql, [old_id, &new_id])?;
+        }
+        tx.execute("DELETE FROM playlist_items WHERE song_id=?1", [old_id])?;
+        tx.execute("DELETE FROM favorites WHERE song_id=?1", [old_id])?;
+        tx.execute("DELETE FROM name_overrides WHERE song_id=?1", [old_id])?;
+        move_lyric_rows(&tx, old_id, &new_id)?;
+        tx.commit()?;
+        Ok(true)
+    }
+    /// Applies the file-name order and hand-made swaps to the library. Returns the songs changed.
+    pub fn apply_names(&mut self) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let rows: Vec<(String, String, String, crate::naming::NameInput)> = {
+            let mut st = tx.prepare(
+                "SELECT s.id, s.title, s.artist, f.root_id, f.rel, f.tag_title, f.tag_artist
+                 FROM songs s JOIN files f ON f.id=s.file_id
+                 WHERE f.cue_sig IS NULL AND s.start_ms=0 AND s.end_ms IS NULL AND f.tag_title IS NOT NULL")?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, crate::naming::NameInput {
+                root_id: r.get(3)?, rel: r.get(4)?, tag_title: r.get(5)?, tag_artist: r.get(6)?,
+            })))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            v
+        };
+        let overrides: HashMap<String, (String, String)> = {
+            let mut st = tx.prepare("SELECT song_id, title, artist FROM name_overrides")?;
+            let v = st.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?.collect::<std::result::Result<HashMap<_, _>, _>>()?;
+            v
+        };
+        let inputs: Vec<crate::naming::NameInput> = rows.iter().map(|r| r.3.clone()).collect();
+        let names = crate::naming::resolve(&inputs);
+        let mut changed = 0;
+        for ((id, title, artist, _), name) in rows.iter().zip(names) {
+            let Some((t, a)) = overrides.get(id).cloned().or(name) else { continue };
+            if t != *title || a != *artist {
+                write_names(&tx, id, &t, &a)?;
+                changed += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+    /// Swaps title and artist, or restores a song that was already swapped. Songs without an artist are skipped.
+    pub fn swap_names(&mut self, ids: &[String]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let mut changed = 0;
+        for id in ids {
+            let saved: Option<(String, String)> = tx.query_row(
+                "SELECT orig_title, orig_artist FROM name_overrides WHERE song_id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            if let Some((t, a)) = saved {
+                tx.execute("DELETE FROM name_overrides WHERE song_id=?1", [id])?;
+                write_names(&tx, id, &t, &a)?;
+                changed += 1;
+                continue;
+            }
+            let row: Option<(String, String)> = tx.query_row("SELECT title, artist FROM songs WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()?;
+            let Some((title, artist)) = row else { continue };
+            if artist.trim().is_empty() || title.trim().is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO name_overrides(song_id,title,artist,orig_title,orig_artist) VALUES(?1,?2,?3,?4,?5)",
+                params![id, artist, title, title, artist])?;
+            write_names(&tx, id, &artist, &title)?;
+            changed += 1;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
     /// Records the date of files that have none yet; a file keeps its first date.
     pub fn fill_added(&mut self, root_id: i64, files: &[(String, i64)]) -> Result<usize> {
@@ -631,7 +746,7 @@ mod tests {
     }
 
     fn meta(rel: &str) -> FileMeta {
-        FileMeta { rel: rel.into(), ext: "mp3".into(), size: 10, mtime: 5, codec: "mp3".into(),
+        FileMeta { tag_title: String::new(), tag_artist: String::new(), rel: rel.into(), ext: "mp3".into(), size: 10, mtime: 5, codec: "mp3".into(),
                    bitrate: 320, duration: 100.0, cover: 1, cue_sig: None }
     }
     fn song(root: &str, rel: &str, start: u64, n: u32) -> NewSong {
@@ -679,6 +794,60 @@ mod tests {
         db.set_setting("lang", "en").unwrap();
         db.set_setting("lang", "zh").unwrap();
         assert_eq!(db.setting("lang").unwrap(), Some("zh".into()));
+    }
+    fn named(db: &mut Db, root: i64, rel: &str, title: &str, artist: &str) -> String {
+        let id = song_id("R", rel, 0);
+        let m = FileMeta { rel: rel.into(), tag_title: title.into(), tag_artist: artist.into(), ..meta(rel) };
+        let s = NewSong { id: id.clone(), title: "raw".into(), artist: "raw".into(), album: "".into(), track: 0, start_ms: 0, end_ms: None, duration: 100.0 };
+        db.replace_file(root, &m, &[s]).unwrap();
+        id
+    }
+    #[test] fn apply_names_fixes_order_and_snapshots() {
+        let mut db = Db::open_in_memory().unwrap();
+        let root = db.add_root("R").unwrap().id;
+        let a = named(&mut db, root, "e/Baby - Justin.mp3", "Baby", "Justin");
+        named(&mut db, root, "f/Justin - Sorry.mp3", "Sorry", "Justin");
+        let pl = db.create_playlist("p", 1).unwrap();
+        db.playlist_add(pl, std::slice::from_ref(&a), 1).unwrap();
+        assert_eq!(db.apply_names().unwrap(), 2);
+        let s = db.song(&a).unwrap().unwrap();
+        assert_eq!((s.title.as_str(), s.artist.as_str()), ("Baby", "Justin"));
+        assert_eq!(db.playlist_items(pl).unwrap()[0].snap.title, "Baby");
+        assert_eq!(db.apply_names().unwrap(), 0);
+    }
+    #[test] fn swap_survives_a_new_pass_and_can_be_undone() {
+        let mut db = Db::open_in_memory().unwrap();
+        let root = db.add_root("R").unwrap().id;
+        let id = named(&mut db, root, "Shutterbug - Glenna.mp3", "Shutterbug", "Glenna");
+        db.apply_names().unwrap();
+        let before = db.song(&id).unwrap().unwrap();
+        assert_eq!(db.swap_names(std::slice::from_ref(&id)).unwrap(), 1);
+        db.apply_names().unwrap();
+        let swapped = db.song(&id).unwrap().unwrap();
+        assert_eq!((swapped.title.as_str(), swapped.artist.as_str()), (before.artist.as_str(), before.title.as_str()));
+        assert_eq!(db.swap_names(std::slice::from_ref(&id)).unwrap(), 1);
+        db.apply_names().unwrap();
+        assert_eq!(db.song(&id).unwrap().unwrap().title, before.title);
+    }
+    #[test] fn rename_keeps_playlists_favorites_and_lyrics() {
+        let mut db = Db::open_in_memory().unwrap();
+        let root = db.add_root("R").unwrap().id;
+        let old = named(&mut db, root, "A - B.mp3", "B", "A");
+        let pl = db.create_playlist("p", 1).unwrap();
+        db.playlist_add(pl, std::slice::from_ref(&old), 1).unwrap();
+        db.set_favorites(std::slice::from_ref(&old), true, 1).unwrap();
+        db.conn().execute("INSERT INTO lyrics(song_id,status,pinned,fetched) VALUES(?1,'ok',1,1)", [&old]).unwrap();
+        db.conn().execute("INSERT INTO lyrics_offset(song_id,offset_ms) VALUES(?1,500)", [&old]).unwrap();
+        assert!(db.rename_file(root, "R", "A - B.mp3", "B - A.mp3").unwrap());
+        let new = song_id("R", "B - A.mp3", 0);
+        assert!(db.song(&old).unwrap().is_none());
+        assert!(db.song(&new).unwrap().is_some());
+        assert_eq!(db.playlist_items(pl).unwrap()[0].song_id, new);
+        assert_eq!(db.favorites().unwrap()[0].song_id, new);
+        assert!(db.lyric(&new).unwrap().unwrap().pinned);
+        let off: i64 = db.conn().query_row("SELECT offset_ms FROM lyrics_offset WHERE song_id=?1", [&new], |r| r.get(0)).unwrap();
+        assert_eq!(off, 500);
+        assert!(!db.file_sigs(root).unwrap()["B - A.mp3"].tags_known);
     }
     #[test] fn song_id_is_stable() {
         assert_eq!(song_id("D:/m", "a/b.mp3", 0), song_id("D:/m", "a/b.mp3", 0));
@@ -765,7 +934,7 @@ mod tests {
         migrate_with(&mut c, &MIGRATIONS[..3]).unwrap();
         c.execute("INSERT INTO playlists(name,created,updated) VALUES('p',1,1)", []).unwrap();
         let db = Db::init(c).unwrap();
-        assert_eq!(schema_version(db.conn()).unwrap(), 4);
+        assert_eq!(schema_version(db.conn()).unwrap(), MIGRATIONS.len() as i64);
         assert_eq!(db.playlists().unwrap().len(), 1);
         assert_eq!(db.lyric("x").unwrap(), None);
         let row = LyricRow { status: "ok".into(), source: Some("lrclib".into()), lrc: Some("[00:01.00]a".into()),

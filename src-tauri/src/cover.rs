@@ -314,7 +314,7 @@ mod tests {
     #[test] fn keep_set_lists_files_with_covers() {
         let mut db = crate::db::Db::open_in_memory().unwrap();
         let r = db.add_root("D:/m").unwrap();
-        let m = |rel: &str, cover: u8| crate::db::FileMeta { rel: rel.into(), ext: "flac".into(), size: 5, mtime: 9,
+        let m = |rel: &str, cover: u8| crate::db::FileMeta { tag_title: String::new(), tag_artist: String::new(), rel: rel.into(), ext: "flac".into(), size: 5, mtime: 9,
             codec: "flac".into(), bitrate: 0, duration: 1.0, cover, cue_sig: None };
         db.replace_file(r.id, &m("a.flac", 1), &[]).unwrap();
         db.replace_file(r.id, &m("b.flac", 0), &[]).unwrap();

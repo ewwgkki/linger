@@ -318,6 +318,11 @@ export function createMock() {
       return lib.roots.map((r) => ({ ...r }));
     },
     set_app_title: () => {},
+    swap_title_artist: ({ songIds }) => {
+      let n = 0;
+      for (const s of lib.songs) if (songIds.includes(s.id) && s.a) { [s.t, s.a] = [s.a, s.t]; n++; }
+      return n;
+    },
     take_installer_language: () => null,
     export_playlist: ({ id }) => {
       const items = id == null ? fav : findList(id).items;

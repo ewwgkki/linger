@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>Linger</title>
+<script src="js/skin-boot.js"></script>
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/fresh.css">
 <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -67,8 +69,8 @@
       <div class="side-h"><h4 data-i18n="side.playlists"></h4><button class="side-add" id="newpl" type="button" data-i18n-title="playlist.new" data-i18n-aria-label="playlist.new"><svg class="i"><use href="#i-new"/></svg></button></div>
       <nav class="nav pl-nav" id="plnav"></nav>
     </div>
-    <div>
-      <h4 data-i18n="side.quality"></h4>
+    <div id="qsec">
+      <div class="side-h"><h4 data-i18n="side.quality"></h4><button class="side-add" id="qtoggle" type="button" aria-expanded="false" aria-controls="qnav" data-i18n-title="side.qualityToggle" data-i18n-aria-label="side.qualityToggle"><svg class="i"><use href="#i-chev"/></svg></button></div>
       <div class="qbar" id="qbar" role="img" data-i18n-aria-label="side.qualityBar"></div>
       <div class="fl" id="qnav"></div>
     </div>
@@ -203,6 +205,11 @@
       <section>
         <h3 data-i18n="settings.language"></h3>
         <div class="seg" id="langseg" role="group" data-i18n-aria-label="settings.language"></div>
+      </section>
+      <section>
+        <h3 data-i18n="settings.appearance"></h3>
+        <div class="seg" id="skinseg" role="group" data-i18n-aria-label="settings.appearance"></div>
+        <p class="hint" data-i18n="settings.appearanceHint"></p>
       </section>
       <section>
         <h3 data-i18n="settings.window"></h3>

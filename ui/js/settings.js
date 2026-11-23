@@ -1,6 +1,7 @@
 // Settings dialog (music folders, scan, FFmpeg), scan progress and the toast.
 import { t, lang, onLanguage, setLanguage, LANGS, LANG_NAMES } from './i18n.js';
 import { api } from './api.js';
+import { SKINS, currentSkin, setSkin } from './skin.js';
 import { rootLabel } from './views/songs.js';
 import { esc, icon, applyOnline } from './util.js';
 import { missingText, summaryKey } from './importview.js';
@@ -83,8 +84,14 @@ function paintLanguages() {
   $('langseg').innerHTML = LANGS.map((l) => `<button type="button" data-lang="${l}" lang="${l}" aria-pressed="${l === lang()}">${esc(LANG_NAMES[l])}</button>`).join('');
 }
 
+function paintSkins() {
+  const now = currentSkin();
+  $('skinseg').innerHTML = SKINS.map((s) => `<button type="button" data-skin-pick="${s}" aria-pressed="${s === now}">${esc(t(`settings.skin.${s}`))}</button>`).join('');
+}
+
 function languageChanged() {
   paintLanguages();
+  paintSkins();
   renderRoots();
   scanInfo();
   ffmpegInfo();
@@ -338,7 +345,14 @@ export function initSettings(c, { loadLibrary }) {
   reload = loadLibrary;
   $('toastx').onclick = hideToast;
   paintLanguages();
+  paintSkins();
   onLanguage(languageChanged);
+  $('skinseg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-skin-pick]');
+    if (!b) return;
+    setSkin(b.dataset.skinPick);
+    paintSkins();
+  });
   $('langseg').addEventListener('click', (e) => {
     const b = e.target.closest('[data-lang]');
     if (b) setLanguage(b.dataset.lang).catch(() => toast(t('settings.langError'), { icon: 'x', autoHide: 6000 }));

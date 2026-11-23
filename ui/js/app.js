@@ -48,6 +48,7 @@ export const ctx = {
   /** Plays `list` (already filtered to playable songs) from `start`. */
   playList: (list, start, shuffle) => playList(list, start, shuffle),
   openSettings: () => { closeDrawer(); openSettings(); },
+  reloadLibrary: () => loadLibrary(),
   openImport: () => { closeDrawer(); openImport(); },
   openPlaylist: (id) => openPlaylist(id),
   /** Full-screen lyrics for a song that is playing or was just asked to play. */
@@ -201,6 +202,16 @@ function enterSongs(patch) {
   closeDrawer(); render(); window.scrollTo({ top: 0 });
 }
 
+function setQualityOpen(open) {
+  $('qsec').toggleAttribute('data-open', open);
+  $('qtoggle').setAttribute('aria-expanded', String(open));
+}
+setQualityOpen(store.get('qualityOpen', false));
+$('qtoggle').onclick = () => {
+  const open = !$('qsec').hasAttribute('data-open');
+  setQualityOpen(open);
+  store.set('qualityOpen', open);
+};
 $('qnav').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   enterSongs({ quality: state.quality === b.dataset.q ? null : b.dataset.q });

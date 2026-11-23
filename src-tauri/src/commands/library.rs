@@ -331,6 +331,12 @@ fn spawn_scan_for(app: AppHandle, root: Option<i64>) {
     }
 }
 
+/// Swaps title and artist for songs the automatic rule got wrong. Files are not changed.
+#[tauri::command(async)]
+pub fn swap_title_artist(song_ids: Vec<String>, state: State<'_, AppState>) -> Result<usize, String> {
+    state.db().swap_names(&song_ids).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,7 +403,7 @@ mod tests {
         let mut db = Db::open_in_memory().unwrap();
         let r1 = db.add_root("D:/m").unwrap();
         let r2 = db.add_root("E:/n").unwrap();
-        let m = |rel: &str| FileMeta { rel: rel.into(), ext: "flac".into(), size: 7, mtime: 1, codec: "flac".into(),
+        let m = |rel: &str| FileMeta { tag_title: String::new(), tag_artist: String::new(), rel: rel.into(), ext: "flac".into(), size: 7, mtime: 1, codec: "flac".into(),
             bitrate: 900, duration: 10.0, cover: 2, cue_sig: None };
         let s = |root: &str, rel: &str, a: &str, n: u32, st: u64| NewSong { id: song_id(root, rel, st), title: format!("t{n}"),
             artist: a.into(), album: "b".into(), track: n, start_ms: st, end_ms: None, duration: 2.5 };
