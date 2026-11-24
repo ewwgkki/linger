@@ -61,6 +61,11 @@ pub fn root_online(path: &Path, timeout: Duration) -> bool {
     spawned && rx.recv_timeout(timeout).unwrap_or(false)
 }
 
+/// macOS can leave an empty folder under /Volumes when a network share disconnects.
+fn looks_unmounted(root: &Path, found_nothing: bool) -> bool {
+    found_nothing && root.starts_with("/Volumes")
+}
+
 fn split_ext(name: &str) -> (&str, String) {
     match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], name[i + 1..].to_ascii_lowercase()),
@@ -493,7 +498,7 @@ fn scan_with(with: &mut WithDb, roots: &[Root], online: &HashSet<i64>, progress:
 
         // Forget files no longer present - unless the root vanished mid-scan.
         let gone = gone_files(&sigs, &seen, &w.failed);
-        if !gone.is_empty() && !root_lost && root_online(root_path, PROBE_TIMEOUT) {
+        if !gone.is_empty() && !root_lost && !looks_unmounted(root_path, seen.is_empty()) && root_online(root_path, PROBE_TIMEOUT) {
             with(&mut |db| {
                 let _ = db.delete_files(root.id, &gone);
             });
@@ -744,6 +749,14 @@ mod tests {
         let s = db.all_songs().unwrap();
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].title, "b");
+    }
+
+    #[test]
+    fn an_empty_network_mount_keeps_the_library() {
+        assert!(looks_unmounted(Path::new("/Volumes/music"), true));
+        assert!(!looks_unmounted(Path::new("/Volumes/music"), false));
+        assert!(!looks_unmounted(Path::new("/Users/a/Music"), true));
+        assert!(!looks_unmounted(Path::new(r"D:\Music"), true));
     }
 
     #[cfg(windows)]

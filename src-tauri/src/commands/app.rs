@@ -19,11 +19,22 @@ fn parse_install_language(text: &str) -> Option<&'static str> {
 #[tauri::command(async)]
 pub fn open_link(link: String) -> Result<(), String> {
     let url = link_url(&link).ok_or("settings.openFailed")?;
+    open_in_system(url).map_err(|_| "settings.openFailed".to_string())
+}
+
+/// Opens a folder or web page with the system's default app.
+pub fn open_in_system(target: &str) -> std::io::Result<()> {
     #[cfg(windows)]
-    std::process::Command::new("explorer").arg(url).spawn().map_err(|_| "settings.openFailed")?;
+    {
+        // explorer reports failure even when it opened the target
+        std::process::Command::new("explorer").arg(target).spawn().map(|_| ())
+    }
     #[cfg(not(windows))]
-    let _ = url;
-    Ok(())
+    {
+        let program = if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" };
+        let status = std::process::Command::new(program).arg(target).status()?;
+        if status.success() { Ok(()) } else { Err(std::io::Error::other("open failed")) }
+    }
 }
 
 fn link_url(link: &str) -> Option<&'static str> {

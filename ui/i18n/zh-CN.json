@@ -87,6 +87,7 @@
   "detail.copyPath": "复制路径",
   "detail.copied": "已复制",
   "detail.selected": "已选中，按 Ctrl+C",
+  "detail.selected.mac": "已选中，按 ⌘C",
 
   "empty.libTitle": "曲库还是空的",
   "empty.libText": "先添加存放音乐的文件夹，然后扫描一遍。",
@@ -126,7 +127,9 @@
 
   "settings.window": "窗口",
   "settings.closeToTray": "关闭窗口时最小化到托盘",
+  "settings.closeToTray.mac": "关闭窗口时保留在菜单栏",
   "settings.closeToTrayHint": "音乐会继续播放。可以从任务栏右下角的托盘图标打开或退出 Linger。",
+  "settings.closeToTrayHint.mac": "音乐会继续播放。点 Dock 图标可以重新打开，也可以从屏幕顶部菜单栏的图标退出 Linger。",
   "settings.closeToTrayError": "这项设置保存失败。",
   "settings.appearance": "外观",
   "settings.appearanceHint": "浅色或深色会跟随系统设置。",
@@ -138,6 +141,7 @@
   "settings.theme": "主题",
   "settings.closeAction": "关闭窗口时",
   "settings.close.tray": "缩到系统托盘",
+  "settings.close.tray.mac": "保留在菜单栏",
   "settings.close.quit": "退出 Linger",
   "settings.netease": "网易云歌词",
   "settings.add": "添加",
@@ -202,6 +206,7 @@
   "settings.promptPath": "音乐文件夹路径",
   "settings.ffmpegFound": "已找到 FFmpeg，WMA 和 APE 格式的歌可以正常播放。",
   "settings.ffmpegMissing": "没有找到 FFmpeg，WMA 和 APE 格式的歌暂时不能播放（会灰显并自动跳过）。把 ffmpeg.exe 放到余音程序所在的文件夹，或安装 FFmpeg 并加入 PATH，然后重启余音。",
+  "settings.ffmpegMissing.mac": "没有找到 FFmpeg，WMA 和 APE 格式的歌暂时不能播放（会灰显并自动跳过）。请重新安装 Linger 来恢复。",
 
   "scan.finding": "正在查找音乐文件…",
   "scan.progress": "正在更新曲库 {done} / {total}",
@@ -332,6 +337,7 @@
   "import.copyMissing": "复制未找到的歌曲",
   "import.copied": "已复制",
   "import.selected": "已选中，请按 Ctrl+C",
+  "import.selected.mac": "已选中，请按 ⌘C",
   "import.allFound": "所有歌曲都找到了。",
   "import.missingBox": "未找到的歌曲",
   "import.close": "关闭",

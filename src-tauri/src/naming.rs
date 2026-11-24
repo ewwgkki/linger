@@ -86,7 +86,8 @@ fn parse(n: &NameInput) -> Option<Parsed> {
     static NUM: OnceLock<Regex> = OnceLock::new();
     static SPACED: OnceLock<Regex> = OnceLock::new();
     static TIGHT: OnceLock<Regex> = OnceLock::new();
-    let (dir, file) = n.rel.rsplit_once('/').unwrap_or(("", &n.rel));
+    let rel = crate::text::file_text(&n.rel);
+    let (dir, file) = rel.rsplit_once('/').unwrap_or(("", rel.as_ref()));
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
     let plain = re(&NUM, r"^\d{1,3}[\s._-]+").replace(stem, "");
     let title = usable(&n.tag_title);

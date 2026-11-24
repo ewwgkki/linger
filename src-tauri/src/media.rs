@@ -1,15 +1,15 @@
-//! Keyboard media keys and the Windows media overlay (System Media Transport Controls).
+//! Keyboard media keys and the system media controls (Windows overlay, macOS Now Playing).
 //! The session starts with the first song, so an idle Linger never takes the keys from other apps.
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub use imp::{init, notify};
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn init(_app: &tauri::AppHandle) {}
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn notify(_app: &tauri::AppHandle) {}
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 mod imp {
     use std::path::{Path, PathBuf};
     use std::sync::mpsc::{self, RecvTimeoutError};
@@ -21,6 +21,7 @@ mod imp {
     use crate::commands::player::{player_next, player_prev, player_seek, player_toggle};
     use crate::state::AppState;
 
+    #[cfg(windows)]
     const MAIN: &str = "main";
     const SEEK_STEP: f64 = 10.0;
     /// While playing, the overlay's position is corrected this often.
@@ -87,8 +88,34 @@ mod imp {
         if secs.is_finite() && secs > 0.0 { Duration::from_secs_f64(secs) } else { Duration::ZERO }
     }
 
+    #[cfg(windows)]
     fn file_url(path: &Path) -> String {
         format!("file://{}", path.display())
+    }
+
+    /// NSURL rejects unescaped text, and the data folder is under "Application Support".
+    #[cfg(not(windows))]
+    fn file_url(path: &Path) -> String {
+        use std::os::unix::ffi::OsStrExt;
+        let mut url = String::from("file://");
+        for &b in path.as_os_str().as_bytes() {
+            if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) {
+                url.push(b as char);
+            } else {
+                url.push_str(&format!("%{b:02X}"));
+            }
+        }
+        url
+    }
+
+    /// The worker thread has no autorelease pool of its own on macOS.
+    #[cfg(target_os = "macos")]
+    fn pooled<T>(f: impl FnOnce() -> T) -> T {
+        objc::rc::autoreleasepool(f)
+    }
+    #[cfg(windows)]
+    fn pooled<T>(f: impl FnOnce() -> T) -> T {
+        f()
     }
 
     fn run(app: &AppHandle, cmd: Command) {
@@ -113,9 +140,11 @@ mod imp {
         let h = app.clone();
         let dispatched = app.run_on_main_thread(move || {
             let made = (|| {
-                let window = h.get_webview_window(MAIN)?;
-                let hwnd = window.hwnd().ok()?;
-                let config = PlatformConfig { dbus_name: "linger", display_name: "Linger", hwnd: Some(hwnd.0 as _) };
+                #[cfg(windows)]
+                let hwnd = Some(h.get_webview_window(MAIN)?.hwnd().ok()?.0 as _);
+                #[cfg(not(windows))]
+                let hwnd = None;
+                let config = PlatformConfig { dbus_name: "linger", display_name: "Linger", hwnd };
                 let mut controls = MediaControls::new(config).map_err(|e| eprintln!("linger: media controls: {e}")).ok()?;
                 let events = h.clone();
                 controls
@@ -164,7 +193,7 @@ mod imp {
             cover_url: url.as_deref(),
             duration: Some(span(s.duration)),
         };
-        if let Err(e) = controls.set_metadata(meta) {
+        if let Err(e) = pooled(|| controls.set_metadata(meta)) {
             eprintln!("linger: media overlay: {e}");
         }
     }
@@ -185,7 +214,7 @@ mod imp {
             playing = now.playing;
             let Some(id) = now.id else {
                 if let Some(c) = controls.as_mut() {
-                    let _ = c.set_playback(MediaPlayback::Stopped);
+                    let _ = pooled(|| c.set_playback(MediaPlayback::Stopped));
                 }
                 shown = None;
                 continue;
@@ -211,7 +240,7 @@ mod imp {
             }
             let progress = Some(MediaPosition(span(now.pos)));
             let playback = if now.playing { MediaPlayback::Playing { progress } } else { MediaPlayback::Paused { progress } };
-            if let Err(e) = c.set_playback(playback) {
+            if let Err(e) = pooled(|| c.set_playback(playback)) {
                 eprintln!("linger: media overlay: {e}");
             }
         }
@@ -273,9 +302,16 @@ mod imp {
             assert_eq!(span(1.5), Duration::from_millis(1500));
         }
 
+        #[cfg(windows)]
         #[test]
         fn cover_path_is_a_file_url() {
             assert_eq!(file_url(Path::new(r"C:\data\covers\a.jpg")), r"file://C:\data\covers\a.jpg");
+        }
+
+        #[cfg(not(windows))]
+        #[test]
+        fn cover_path_is_an_escaped_file_url() {
+            assert_eq!(file_url(Path::new("/Users/a/Application Support/封.jpg")), "file:///Users/a/Application%20Support/%E5%B0%81.jpg");
         }
 
         #[test]

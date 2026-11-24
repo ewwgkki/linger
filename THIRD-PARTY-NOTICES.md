@@ -1,6 +1,6 @@
 # Third-party notices
 
-The Windows installer includes `ffmpeg.exe`, an audio-only build of FFmpeg 9.1.
+The Windows installer and the macOS app include `ffmpeg`, an audio-only build of FFmpeg 9.1.
 
 - Project: https://ffmpeg.org/
 - Source: https://ffmpeg.org/releases/ffmpeg-9.1.tar.xz
@@ -8,4 +8,4 @@ The Windows installer includes `ffmpeg.exe`, an audio-only build of FFmpeg 9.1.
 - License: GNU LGPL version 2.1 or later, see `licenses/FFmpeg-LGPL-2.1.txt`
 - Build options: see `scripts/build-ffmpeg.sh` in the Linger repository
 
-Linger runs `ffmpeg.exe` as a separate program. You may replace it with your own build.
+Linger runs `ffmpeg` as a separate program. You may replace it with your own build.

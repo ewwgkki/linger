@@ -67,6 +67,8 @@ pub fn derive(rel: &str, tag: &RawTags, duration: f64) -> Derived {
     static EXT: OnceLock<Regex> = OnceLock::new();
     static NUM: OnceLock<Regex> = OnceLock::new();
     static TNUM: OnceLock<Regex> = OnceLock::new();
+    let rel = crate::text::file_text(rel);
+    let rel = rel.as_ref();
     let file = basename(rel);
     let base = re(&EXT, r"\.[^.]+$").replace(file, "").into_owned();
     let folder = match rel.rfind('/') {

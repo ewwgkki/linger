@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "category": "Music",
+    "externalBin": ["binaries/installer/ffmpeg"],
+    "resources": {
+      "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md",
+      "../licenses/FFmpeg-LGPL-2.1.txt": "licenses/FFmpeg-LGPL-2.1.txt"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-"
+    }
+  }
+}

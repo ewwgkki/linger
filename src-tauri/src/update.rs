@@ -108,10 +108,15 @@ pub async fn update_check(manual: bool, app: AppHandle) -> Result<Option<UpdateI
         eprintln!("linger: updater: {e}");
         CHECK_FAILED.to_string()
     })?;
-    let found = updater.check().await.map_err(|e| {
-        eprintln!("linger: update check: {e}");
-        CHECK_FAILED.to_string()
-    })?;
+    let found = match updater.check().await {
+        Ok(found) => found,
+        // the latest release has no package for this platform yet
+        Err(tauri_plugin_updater::Error::TargetNotFound(_) | tauri_plugin_updater::Error::TargetsNotFound(_)) => None,
+        Err(e) => {
+            eprintln!("linger: update check: {e}");
+            return Err(CHECK_FAILED.to_string());
+        }
+    };
     {
         let state = app.state::<AppState>();
         let db = state.db();
@@ -196,8 +201,14 @@ pub fn update_install(app: AppHandle) -> Result<(), String> {
         crate::tray::cancel_exit(&app);
         return Err(INSTALL_FAILED.into());
     }
-    app.exit(0);
-    Ok(())
+    // the Windows installer reopens Linger itself; on macOS the app was replaced in place
+    #[cfg(target_os = "macos")]
+    app.restart();
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.exit(0);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

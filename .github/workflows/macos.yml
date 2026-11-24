@@ -1,0 +1,89 @@
+name: macOS build
+
+on:
+  push:
+    branches: [macos-port]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    timeout-minutes: 75
+    env:
+      FFMPEG_SHA256: 1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        run: rustup default stable && rustc --version
+
+      - name: Cache Rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-tauri
+            src-tauri/target
+          key: macos-rust-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: macos-rust-
+
+      - name: Cache FFmpeg
+        id: ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries/installer/ffmpeg-aarch64-apple-darwin
+          key: macos-ffmpeg-${{ env.FFMPEG_SHA256 }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+
+      - name: Build FFmpeg
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/ff" src-tauri/binaries/installer
+          curl -fsSL https://ffmpeg.org/releases/ffmpeg-9.1.tar.xz -o "$RUNNER_TEMP/ff/src.tar.xz"
+          echo "$FFMPEG_SHA256  $RUNNER_TEMP/ff/src.tar.xz" | shasum -a 256 -c -
+          tar -xf "$RUNNER_TEMP/ff/src.tar.xz" -C "$RUNNER_TEMP/ff"
+          bash scripts/build-ffmpeg.sh "$RUNNER_TEMP/ff/ffmpeg-9.1" "$PWD/src-tauri/binaries/installer/ffmpeg-aarch64-apple-darwin"
+
+      - name: Test the interface
+        run: node --test ui/test/index.js
+
+      - name: Test the app
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Install Tauri CLI
+        run: command -v cargo-tauri || cargo install tauri-cli --version "^2" --locked
+
+      - name: Build the dmg
+        run: cargo tauri build --bundles dmg --config src-tauri/tauri.dmg.conf.json
+
+      - name: Check the app
+        run: |
+          dmg=$(ls src-tauri/target/release/bundle/dmg/*.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt"
+          app="$mnt/Linger.app"
+          codesign --verify --deep --strict "$app"
+          lipo -archs "$app/Contents/MacOS/linger" | grep -q arm64
+          "$app/Contents/MacOS/ffmpeg" -hide_banner -version | grep -q 'enable-small'
+          if "$app/Contents/MacOS/ffmpeg" -hide_banner -version | grep -q 'enable-gpl'; then exit 1; fi
+          "$app/Contents/MacOS/ffmpeg" -hide_banner -decoders | grep -q wmav2
+          "$app/Contents/MacOS/ffmpeg" -hide_banner -decoders | grep -q ' ape '
+          if otool -L "$app/Contents/MacOS/ffmpeg" | tail -n +2 | grep -Ev '/usr/lib/|/System/Library/'; then exit 1; fi
+          home=$(mktemp -d)
+          HOME="$home" "$app/Contents/MacOS/linger" & pid=$!
+          sleep 15
+          kill -0 "$pid"
+          test -f "$home/Library/Application Support/Linger/linger.db"
+          kill "$pid"
+          wait "$pid" || true
+          hdiutil detach "$mnt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Linger-macOS-AppleSilicon
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

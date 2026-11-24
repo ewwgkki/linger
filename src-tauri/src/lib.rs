@@ -124,6 +124,7 @@ pub fn run() {
             commands::lyrics::lyrics_set_settings,
             commands::lyrics::cover_color,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Linger");
+        .build(tauri::generate_context!())
+        .expect("error while starting Linger")
+        .run(tray::on_run_event);
 }

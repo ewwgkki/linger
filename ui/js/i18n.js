@@ -23,8 +23,13 @@ export function setMessages(l, messages) {
 
 const has = (k) => Object.prototype.hasOwnProperty.call(dict, k);
 
-/** `params.n === 1` uses `key_one` when the dictionary has it (en singulars). */
+let mac = /^Mac/.test((globalThis.navigator && navigator.platform) || '');
+/** Tests can pretend to run on macOS. */
+export function setMac(v) { mac = !!v; }
+
+/** On macOS `key.mac` replaces `key`. `params.n === 1` uses `key_one` when the dictionary has it (en singulars). */
 export function t(key, params) {
+  if (mac && has(key + '.mac')) key += '.mac';
   if (params && params.n === 1 && has(key + '_one')) key += '_one';
   const s = has(key) ? dict[key] : key;
   if (!params) return s;

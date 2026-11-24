@@ -94,6 +94,7 @@
   "detail.copyPath": "Copy path",
   "detail.copied": "Copied",
   "detail.selected": "Selected, press Ctrl+C",
+  "detail.selected.mac": "Selected, press ⌘C",
 
   "empty.libTitle": "Your library is empty",
   "empty.libText": "Add the folders where you keep music, then scan them once.",
@@ -133,7 +134,9 @@
 
   "settings.window": "Window",
   "settings.closeToTray": "Minimize to the system tray when I close the window",
+  "settings.closeToTray.mac": "Keep Linger in the menu bar when I close the window",
   "settings.closeToTrayHint": "Music keeps playing. Open or quit Linger from the tray icon at the bottom right of the taskbar.",
+  "settings.closeToTrayHint.mac": "Music keeps playing. Click the Dock icon to reopen Linger, or quit from its icon in the menu bar.",
   "settings.closeToTrayError": "Couldn't save this setting.",
   "settings.appearance": "Appearance",
   "settings.appearanceHint": "Light or dark follows your system.",
@@ -145,6 +148,7 @@
   "settings.theme": "Theme",
   "settings.closeAction": "When closing the window",
   "settings.close.tray": "Keep in tray",
+  "settings.close.tray.mac": "Keep in menu bar",
   "settings.close.quit": "Quit Linger",
   "settings.netease": "NetEase lyrics",
   "settings.add": "Add",
@@ -214,6 +218,7 @@
   "settings.promptPath": "Music folder path",
   "settings.ffmpegFound": "FFmpeg found: WMA and APE songs can be played.",
   "settings.ffmpegMissing": "FFmpeg not found, so WMA and APE songs can't be played for now (they are greyed out and skipped). Put ffmpeg.exe next to the Linger program, or install FFmpeg and add it to PATH, then restart Linger.",
+  "settings.ffmpegMissing.mac": "FFmpeg not found, so WMA and APE songs can't be played for now (they are greyed out and skipped). Reinstall Linger to restore it.",
 
   "scan.finding": "Looking for music files…",
   "scan.progress": "Updating library {done} / {total}",
@@ -360,6 +365,7 @@
   "import.copyMissing": "Copy missing songs",
   "import.copied": "Copied",
   "import.selected": "Selected, press Ctrl+C",
+  "import.selected.mac": "Selected, press ⌘C",
   "import.allFound": "All songs were found.",
   "import.missingBox": "Songs not found",
   "import.close": "Close",

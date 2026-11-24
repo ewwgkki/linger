@@ -338,7 +338,7 @@ fn spawn_scan_for(app: AppHandle, root: Option<i64>) {
     }
 }
 
-/// Shows a music folder in File Explorer. Only folders already in the library can be opened.
+/// Shows a music folder in File Explorer or Finder. Only folders already in the library can be opened.
 #[tauri::command(async)]
 pub fn open_root(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     let roots = state.db().roots().map_err(|e| e.to_string())?;
@@ -346,9 +346,7 @@ pub fn open_root(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     if !Path::new(&root.path).is_dir() {
         return Err("settings.openFailed".into());
     }
-    #[cfg(windows)]
-    std::process::Command::new("explorer").arg(&root.path).spawn().map_err(|_| "settings.openFailed")?;
-    Ok(())
+    super::app::open_in_system(&root.path).map_err(|_| "settings.openFailed".to_string())
 }
 
 /// Swaps title and artist for songs the automatic rule got wrong. Files are not changed.

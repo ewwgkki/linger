@@ -34,8 +34,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 
-[target."cfg(windows)".dependencies]
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 souvlaki = { version = "0.9.3", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

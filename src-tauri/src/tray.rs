@@ -1,4 +1,4 @@
-//! System tray: closing the window keeps Linger playing in the notification area.
+//! System tray (menu bar on macOS): closing the window keeps Linger playing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex, MutexGuard};
@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, State, Window, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, Window, WindowEvent, Wry};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 use crate::commands::player::{player_next, player_prev, player_toggle};
@@ -46,7 +46,11 @@ fn labels(lang: &str) -> Labels {
             next: "下一首",
             show: "显示 Linger",
             quit: "退出",
-            hint: "Linger 仍在后台运行。可以从任务栏右下角的托盘图标打开或退出；如果没看到图标，请点右下角的 ^。",
+            hint: if cfg!(target_os = "macos") {
+                "Linger 仍在后台运行。点 Dock 图标可以重新打开，也可以从屏幕顶部菜单栏的图标退出。"
+            } else {
+                "Linger 仍在后台运行。可以从任务栏右下角的托盘图标打开或退出；如果没看到图标，请点右下角的 ^。"
+            },
         }
     } else {
         Labels {
@@ -57,7 +61,11 @@ fn labels(lang: &str) -> Labels {
             next: "Next",
             show: "Show Linger",
             quit: "Quit",
-            hint: "Linger is still running. Open or quit it from the tray icon at the bottom right of the taskbar. If you can't see the icon, click ^ there.",
+            hint: if cfg!(target_os = "macos") {
+                "Linger is still running. Click its Dock icon to reopen it, or quit from its icon in the menu bar."
+            } else {
+                "Linger is still running. Open or quit it from the tray icon at the bottom right of the taskbar. If you can't see the icon, click ^ there."
+            },
         }
     }
 }
@@ -142,10 +150,19 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let mut builder = TrayIconBuilder::with_id(MAIN)
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        // a menu bar icon opens its menu on click; the Windows tray icon toggles the window
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .tooltip("Linger")
         .on_menu_event(on_menu)
         .on_tray_icon_event(|tray, ev| on_icon(tray.app_handle(), ev));
+    #[cfg(target_os = "macos")]
+    {
+        match menu_bar_icon() {
+            Some(i) => builder = builder.icon(i).icon_as_template(true),
+            None => eprintln!("linger: cannot read the menu bar icon"),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(i) = app.default_window_icon() {
         builder = builder.icon(i.clone());
     }
@@ -170,6 +187,14 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let h = app.clone();
     std::thread::Builder::new().name("linger-tray".into()).spawn(move || refresh_loop(h, rx))?;
     Ok(())
+}
+
+/// A black-and-alpha image, so macOS can tint it for light and dark menu bars.
+#[cfg(target_os = "macos")]
+fn menu_bar_icon() -> Option<tauri::image::Image<'static>> {
+    let img = image::load_from_memory(include_bytes!("../icons/menu-bar-template.png")).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    Some(tauri::image::Image::new_owned(img.into_raw(), w, h))
 }
 
 /// Menu updates wait on the main thread, so they run here with no app lock held.
@@ -238,6 +263,9 @@ fn on_menu(app: &AppHandle, ev: MenuEvent) {
 }
 
 fn on_icon(app: &AppHandle, ev: TrayIconEvent) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
     let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = ev else { return };
     let Some(t) = app.try_state::<Tray>() else { return };
     {
@@ -291,6 +319,23 @@ pub fn on_window_event(window: &Window, ev: &WindowEvent) {
         }
         _ => {}
     }
+}
+
+/// macOS only: the Dock icon reopens a hidden window, and Cmd+Q must save and stop like Quit.
+pub fn on_run_event(app: &AppHandle, ev: RunEvent) {
+    #[cfg(target_os = "macos")]
+    match ev {
+        RunEvent::Reopen { .. } => show(app),
+        RunEvent::Exit => {
+            let quitting = app.try_state::<Tray>().is_some_and(|t| t.quitting.load(Ordering::SeqCst));
+            if !quitting && app.try_state::<AppState>().is_some() {
+                prepare_exit(app);
+            }
+        }
+        _ => {}
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, ev);
 }
 
 fn first_close_hint(app: &AppHandle) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { t, setMessages, detectLang, lang, setLanguage, onLanguage } from '../js/i18n.js';
+import { t, setMessages, detectLang, lang, setLanguage, onLanguage, setMac } from '../js/i18n.js';
 
 const ui = join(dirname(fileURLToPath(import.meta.url)), '..');
 const load = (l) => JSON.parse(readFileSync(join(ui, 'i18n', `${l}.json`), 'utf8'));
@@ -168,4 +168,14 @@ test('one failing listener does not stop the others', async () => {
   console.error = realError; a(); b();
   assert.ok(ran);
   setMessages('zh-CN', load('zh-CN'));
+});
+
+test('macOS wording replaces the Windows wording only on macOS', () => {
+  setMessages('en', { 'a.tray': 'Keep in tray', 'a.tray.mac': 'Keep in menu bar', 'a.plain': 'Same' });
+  setMac(false);
+  assert.equal(t('a.tray'), 'Keep in tray');
+  setMac(true);
+  assert.equal(t('a.tray'), 'Keep in menu bar');
+  assert.equal(t('a.plain'), 'Same');
+  setMac(false);
 });

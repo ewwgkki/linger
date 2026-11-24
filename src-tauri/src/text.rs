@@ -8,6 +8,19 @@ fn re(cell: &'static OnceLock<Regex>, pat: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pat).expect("valid regex"))
 }
 
+/// File names as shown to people. macOS can report accents as separate characters.
+pub fn file_text(s: &str) -> std::borrow::Cow<'_, str> {
+    #[cfg(target_os = "macos")]
+    {
+        use unicode_normalization::UnicodeNormalization;
+        s.nfc().collect::<String>().into()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        s.into()
+    }
+}
+
 /// Port of `is_broken`.
 pub fn is_broken(s: &str) -> bool {
     static A: OnceLock<Regex> = OnceLock::new();
