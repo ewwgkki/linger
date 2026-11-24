@@ -196,16 +196,32 @@ pub fn pick_auto(q: &Query, search: &dyn Fn(&Query) -> Result<Vec<Candidate>, Ne
     if q.title.trim().is_empty() {
         return Ok(None);
     }
-    let cands = search(q)?;
-    if let Some(c) = pick_best(&cands, q).or_else(|| pick_relaxed(&cands, q)) {
-        return Ok(Some(c.clone()));
+    let first = pick_from(&search(q)?, q);
+    if !has_artist(q) || first.as_ref().is_some_and(|c| c.synced) {
+        return Ok(first);
     }
-    if !has_artist(q) {
-        return Ok(None);
-    }
+    // nothing timed yet: a title-only search may find the timed version
     let title_only = Query { artist: String::new(), ..q.clone() };
-    let cands = search(&title_only)?;
-    Ok(pick_best(&cands, q).or_else(|| pick_relaxed(&cands, q)).cloned())
+    let second = match search(&title_only) {
+        Ok(cands) => pick_from(&cands, q),
+        Err(e) if first.is_none() => return Err(e),
+        Err(_) => None,
+    };
+    Ok(match (first, second) {
+        (_, Some(s)) if s.synced => Some(s),
+        (Some(f), _) => Some(f),
+        (None, s) => s,
+    })
+}
+
+/// A timed match if there is one, otherwise any match.
+fn pick_from(cands: &[Candidate], q: &Query) -> Option<Candidate> {
+    let timed: Vec<Candidate> = cands.iter().filter(|c| c.synced).cloned().collect();
+    pick_best(&timed, q)
+        .or_else(|| pick_relaxed(&timed, q))
+        .or_else(|| pick_best(cands, q))
+        .or_else(|| pick_relaxed(cands, q))
+        .cloned()
 }
 
 #[cfg(test)]
@@ -374,6 +390,33 @@ mod tests {
         assert_eq!(calls.get(), 1);
         let down = |_: &Query| Err(NetError);
         assert_eq!(pick_auto(&q("A", "B", 200.0), &down), Err(NetError));
+    }
+
+    #[test]
+    fn a_timed_relaxed_match_beats_an_exact_plain_one() {
+        let c = [cand("A", "B", 200.0, false, "plain"), cand("A", "Other", 200.0, true, "timed")];
+        let found = |_: &Query| Ok(c.to_vec());
+        assert_eq!(pick_auto(&q("A", "B", 200.0), &found).unwrap().unwrap().ext_id, "timed");
+    }
+
+    #[test]
+    fn plain_only_results_look_further_then_keep_the_plain_one() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let found = |_: &Query| { calls.set(calls.get() + 1); Ok(vec![cand("A", "B", 200.0, false, "1")]) };
+        assert_eq!(pick_auto(&q("A", "B", 200.0), &found).unwrap().unwrap().ext_id, "1");
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn a_failed_second_search_keeps_the_first_result() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let flaky = |_: &Query| {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 { Ok(vec![cand("A", "B", 200.0, false, "1")]) } else { Err(NetError) }
+        };
+        assert_eq!(pick_auto(&q("A", "B", 200.0), &flaky).unwrap().unwrap().ext_id, "1");
     }
 
     #[test]

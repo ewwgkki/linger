@@ -90,6 +90,8 @@ const MIGRATIONS: &[&str] = &[
     // v6: measured loudness, valid for one version of the file (lufs NULL: nothing measurable)
     "CREATE TABLE loudness(song_id TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL,
        lufs REAL, peak REAL);",
+    // v7: songs whose untimed lyrics were recently checked for a timed version
+    "CREATE TABLE lyric_upgrades(song_id TEXT PRIMARY KEY, key TEXT NOT NULL, checked INTEGER NOT NULL);",
 ];
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -200,6 +202,7 @@ fn move_lyric_rows(c: &Connection, old: &str, new: &str) -> rusqlite::Result<()>
     c.execute("DELETE FROM lyrics WHERE song_id=?1", [old])?;
     c.execute("UPDATE OR IGNORE lyrics_offset SET song_id=?2 WHERE song_id=?1", [old, new])?;
     c.execute("DELETE FROM lyrics_offset WHERE song_id=?1", [old])?;
+    c.execute("UPDATE OR REPLACE lyric_upgrades SET song_id=?2 WHERE song_id=?1", [old, new])?;
     Ok(())
 }
 
@@ -580,6 +583,27 @@ impl Db {
              WHERE lyrics.pinned=0 AND (excluded.status='ok' OR lyrics.status<>'ok')",
             params![song_id, row.status, row.source, row.ext_id, row.lrc, row.yrc, row.trans, row.plain, row.fetched])?;
         Ok(n > 0)
+    }
+    /// Adds timing to an untimed manual choice; any newer choice is left alone.
+    pub fn upgrade_pinned_lyric(&self, song_id: &str, row: &LyricRow) -> Result<bool> {
+        let n = self.conn.execute(
+            "UPDATE lyrics SET source=?2, ext_id=?3, lrc=?4, yrc=?5, trans=?6, plain=?7, fetched=?8
+             WHERE song_id=?1 AND pinned=1 AND lrc IS NULL AND yrc IS NULL AND source<>'manual'",
+            params![song_id, row.source, row.ext_id, row.lrc, row.yrc, row.trans, row.plain, row.fetched])?;
+        Ok(n > 0)
+    }
+    /// Whether this song was checked for timed lyrics after `since`, under the same conditions.
+    pub fn lyric_upgrade_checked(&self, song_id: &str, key: &str, since: i64) -> Result<bool> {
+        let found: Option<i64> = self.conn.query_row(
+            "SELECT 1 FROM lyric_upgrades WHERE song_id=?1 AND key=?2 AND checked>?3",
+            params![song_id, key, since], |r| r.get(0)).optional()?;
+        Ok(found.is_some())
+    }
+    pub fn mark_lyric_upgrade_checked(&self, song_id: &str, key: &str, now: i64) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO lyric_upgrades(song_id, key, checked) VALUES(?1,?2,?3)",
+            params![song_id, key, now])?;
+        Ok(())
     }
     /// 0 when the song has no stored offset.
     pub fn lyric_offset(&self, song_id: &str) -> Result<i32> {

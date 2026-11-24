@@ -52,7 +52,8 @@ async function search() {
     return;
   }
   if (me !== searchSeq || songId !== id) return;
-  results = found || [];
+  // timed lyrics first, keeping each site's own order
+  results = [...(found || [])].sort((a, b) => Number(!!b.synced) - Number(!!a.synced));
   showResults();
   say(results.length ? '' : t('lyrics.noResults'));
 }

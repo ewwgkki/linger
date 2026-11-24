@@ -80,6 +80,7 @@ impl Provider for Lrclib {
     }
 
     fn best(&self, q: &Query) -> Result<Option<Raw>, NetError> {
+        let mut exact = None;
         if super::online::has_artist(q) {
             let dur = (q.duration.round() as i64).to_string();
             let mut params = vec![("track_name", q.title.as_str()), ("artist_name", q.artist.as_str())];
@@ -91,15 +92,19 @@ impl Provider for Lrclib {
             }
             if let Some(body) = http_get(&format!("{BASE}/get"), &params, &[("User-Agent", UA)])? {
                 shape_ok(&body, false)?;
-                if let Some(raw) = parse_track(&body) {
-                    return Ok(Some(raw));
+                exact = parse_track(&body);
+                if exact.as_ref().is_some_and(|raw| raw.lrc.is_some()) {
+                    return Ok(exact);
                 }
             }
         }
-        // no exact entry: search and match on title and length
-        match super::online::pick_auto(q, &|x| self.search(x))? {
-            Some(c) => self.fetch(&c.ext_id),
-            None => Ok(None),
+        // no exact timed entry: search and match on title and length
+        match (super::online::pick_auto(q, &|x| self.search(x)), exact) {
+            (Ok(Some(c)), _) if c.synced => self.fetch(&c.ext_id),
+            (_, Some(raw)) => Ok(Some(raw)),
+            (Ok(Some(c)), None) => self.fetch(&c.ext_id),
+            (Ok(None), None) => Ok(None),
+            (Err(e), None) => Err(e),
         }
     }
 

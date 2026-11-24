@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "linger"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "ebur128",
  "encoding_rs",

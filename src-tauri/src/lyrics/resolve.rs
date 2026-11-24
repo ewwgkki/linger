@@ -8,7 +8,10 @@ use std::sync::{Mutex, MutexGuard};
 
 pub const NONE_TTL_SECS: i64 = 7 * 24 * 3600;
 /// Bumped when auto-matching improves, so earlier "no lyrics" answers are looked up again.
-const MATCH_RULES: u32 = 2;
+const MATCH_RULES: u32 = 3;
+const MAX_COMPARE_TOKENS: usize = 1500;
+const MIN_COMPARE_TOKENS: usize = 8;
+const SAME_LYRICS_RATIO: f64 = 0.6;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
@@ -59,23 +62,89 @@ fn none_key(song: &SongRow, providers: &[&dyn Provider]) -> String {
     sha1_smol::Sha1::from(text).digest().to_string()[..16].to_string()
 }
 
+/// Words (Latin) and single characters (CJK), for comparing two versions of a lyric.
+fn lyric_tokens(p: &Parsed) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in &p.lines {
+        let mut word = String::new();
+        for c in line.text.chars() {
+            if c.is_ascii_alphanumeric() {
+                word.push(c.to_ascii_lowercase());
+                continue;
+            }
+            if !word.is_empty() {
+                out.push(std::mem::take(&mut word));
+            }
+            if c.is_alphanumeric() {
+                out.push(c.to_string());
+            }
+        }
+        if !word.is_empty() {
+            out.push(word);
+        }
+        if out.len() >= MAX_COMPARE_TOKENS {
+            out.truncate(MAX_COMPARE_TOKENS);
+            break;
+        }
+    }
+    out
+}
+
+/// Whether two lyrics are the same words, in order. Traditional and Simplified Chinese versions
+/// of one song still share most characters; different songs share few in sequence.
+pub fn same_lyrics(a: &Parsed, b: &Parsed) -> bool {
+    let (a, b) = (lyric_tokens(a), lyric_tokens(b));
+    let shorter = a.len().min(b.len());
+    if shorter < MIN_COMPARE_TOKENS {
+        return false;
+    }
+    let mut row = vec![0u32; b.len() + 1];
+    for x in &a {
+        let mut diagonal = 0;
+        for (j, y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = if x == y { diagonal + 1 } else { above.max(row[j]) };
+            diagonal = above;
+        }
+    }
+    row[b.len()] as f64 / shorter as f64 >= SAME_LYRICS_RATIO
+}
+
+/// Untimed lyrics being shown, which a timed version of the same words may replace.
+struct Untimed {
+    parsed: Parsed,
+    source: String,
+    pinned: bool,
+}
+
+impl Untimed {
+    fn resolved(self) -> Resolved {
+        ok(self.parsed, &self.source)
+    }
+}
+
 /// `keep_going` is checked before each provider call: once false (the song is no longer current)
-/// the lookup stops with "retry" and writes nothing.
+/// the lookup stops and writes nothing.
 pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: &[&dyn Provider], now: i64, keep_going: &dyn Fn() -> bool) -> Resolved {
     let cached = lock(db).lyric(&song.id).ok().flatten();
+    let mut untimed: Option<Untimed> = None;
 
-    // 1. manual choice
+    // 1. manual choice; an untimed online choice may still gain timing
     if let Some(row) = cached.as_ref().filter(|r| r.pinned && r.status == "ok") {
         let p = parsed_of(row);
         if !p.is_empty() {
-            return ok(p, row.source.as_deref().unwrap_or("manual"));
+            let source = row.source.as_deref().unwrap_or("manual");
+            if p.kind() != "plain" || source == "manual" {
+                return ok(p, source);
+            }
+            untimed = Some(Untimed { parsed: p, source: source.to_string(), pinned: true });
         }
     }
 
     // 2-4. local sources (never cached; no db lock held)
     let is_cue = song.start_ms > 0 || song.end_ms.is_some();
-    let mut embedded_plain = None;
-    if let (false, Some(audio)) = (is_cue, audio) {
+    if let (false, Some(audio), true) = (is_cue, audio, untimed.is_none()) {
+        let mut embedded_plain = None;
         if let Some(text) = crate::tags::read_lyrics(audio) {
             let p = parse_lrc(&text);
             if !p.is_empty() {
@@ -91,34 +160,42 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
                 return ok(p, "file");
             }
         }
-        if let Some(p) = embedded_plain {
-            return ok(p, "embedded");
-        }
+        untimed = embedded_plain.map(|parsed| Untimed { parsed, source: "embedded".into(), pinned: false });
     }
 
     // 5-6. cache
     let key = none_key(song, providers);
-    if let Some(row) = &cached {
+    if let Some(row) = cached.as_ref().filter(|r| !r.pinned || r.status != "ok") {
         if row.status == "ok" {
             let p = parsed_of(row);
             if !p.is_empty() {
-                return ok(p, row.source.as_deref().unwrap_or("manual"));
+                let source = row.source.as_deref().unwrap_or("manual");
+                if p.kind() != "plain" {
+                    return ok(p, source);
+                }
+                if untimed.is_none() {
+                    untimed = Some(Untimed { parsed: p, source: source.to_string(), pinned: false });
+                }
             }
-        } else if row.status == "none" && row.ext_id.as_deref() == Some(key.as_str())
+        } else if untimed.is_none() && row.status == "none" && row.ext_id.as_deref() == Some(key.as_str())
             && now < row.fetched.saturating_add(NONE_TTL_SECS) {
             return status_only("none");
         }
     }
+    if untimed.is_some() && lock(db).lyric_upgrade_checked(&song.id, &key, now - NONE_TTL_SECS).unwrap_or(false) {
+        return untimed.map(Untimed::resolved).unwrap_or_else(|| status_only("none"));
+    }
 
-    // 7. providers
+    // 7. providers: the first timed lyric wins; untimed text is only a fallback
     if providers.is_empty() {
-        return status_only("none");
+        return untimed.map_or_else(|| status_only("none"), Untimed::resolved);
     }
     let q = Query { title: song.title.clone(), artist: song.artist.clone(), album: song.album.clone(), duration: song.duration };
     let mut failed = false;
+    let mut plain_hit: Option<(&'static str, Raw, Parsed)> = None;
     for p in providers {
         if !keep_going() {
-            return status_only("retry");
+            return untimed.map_or_else(|| status_only("retry"), Untimed::resolved);
         }
         match p.best(&q) {
             Ok(Some(raw)) => {
@@ -126,13 +203,41 @@ pub fn resolve(db: &Mutex<Db>, song: &SongRow, audio: Option<&Path>, providers: 
                 if parsed.is_empty() {
                     continue;
                 }
+                if parsed.kind() == "plain" {
+                    if plain_hit.is_none() {
+                        plain_hit = Some((p.name(), raw, parsed));
+                    }
+                    continue;
+                }
+                // a timed lyric only replaces existing text when it is the same song's words
+                if untimed.as_ref().is_some_and(|u| !same_lyrics(&u.parsed, &parsed)) {
+                    continue;
+                }
                 let row = row_of(p.name(), raw, now);
-                let _ = lock(db).put_fetched_lyric(&song.id, &row);
+                if untimed.as_ref().is_some_and(|u| u.pinned) {
+                    let _ = lock(db).upgrade_pinned_lyric(&song.id, &row);
+                } else {
+                    let _ = lock(db).put_fetched_lyric(&song.id, &row);
+                }
                 return ok(parsed, p.name());
             }
             Ok(None) => {}
             Err(_) => failed = true,
         }
+    }
+    if let Some(u) = untimed {
+        if !failed {
+            let _ = lock(db).mark_lyric_upgrade_checked(&song.id, &key, now);
+        }
+        return u.resolved();
+    }
+    if let Some((name, raw, parsed)) = plain_hit {
+        let row = row_of(name, raw, now);
+        let _ = lock(db).put_fetched_lyric(&song.id, &row);
+        if !failed {
+            let _ = lock(db).mark_lyric_upgrade_checked(&song.id, &key, now);
+        }
+        return ok(parsed, name);
     }
     if failed {
         return status_only("retry");
@@ -231,7 +336,88 @@ mod tests {
         let f = Fake::new("lrclib", Ok(Some(timed())));
         let r = resolve(&mem(), &song(), Some(&a), &[&f], 100);
         assert_eq!((r.source.as_deref(), r.parsed.kind()), (Some("embedded"), "plain"));
+        assert_eq!(f.n(), 1); // looked for timing, but those are other words
+    }
+    const WORDS: &str = "morning light on the water\nwe walk where the road runs thin\ncounting the lamps as they fade";
+    const TIMED_WORDS: &str = "[00:01.00]morning light on the water\n[00:05.00]we walk where the road runs thin\n[00:09.00]counting the lamps as they fade";
+    const OTHER_WORDS: &str = "[00:01.00]every window holds a song\n[00:05.00]slow rivers bring us home\n[00:09.00]tomorrow answers back again";
+    fn parsed(text: &str) -> Parsed { parse_lrc(text) }
+
+    #[test] fn same_words_are_recognized_across_scripts() {
+        assert!(same_lyrics(&parsed(WORDS), &parsed(TIMED_WORDS)));
+        assert!(!same_lyrics(&parsed(WORDS), &parsed(OTHER_WORDS)));
+        let traditional = "將你穿過的球鞋留給我\n走過了泥濘只有我才懂\n和你不能笑著走到盡頭";
+        let simplified = "[00:01.00]将你穿过的球鞋留给我\n[00:05.00]走过了泥泞只有我才懂\n[00:09.00]和你不能笑着走到尽头";
+        assert!(same_lyrics(&parsed(traditional), &parsed(simplified)));
+        assert!(!same_lyrics(&parsed("短"), &parsed("[00:01.00]短")));
+    }
+    #[test] fn embedded_plain_gains_timing_from_the_same_lyric() {
+        let d = tempfile::tempdir().unwrap();
+        let a = mp3_with(d.path(), "a.mp3", WORDS);
+        let db = mem();
+        let f = Fake::new("netease", Ok(Some(TIMED_WORDS)));
+        let r = resolve(&db, &song(), Some(&a), &[&f], 100);
+        assert_eq!((r.source.as_deref(), r.parsed.kind()), (Some("netease"), "line"));
+        let again = resolve(&db, &song(), Some(&a), &[&f], 200);
+        assert_eq!(again.parsed.kind(), "line");
+        assert_eq!(f.n(), 1);
+    }
+    #[test] fn plain_from_one_site_does_not_stop_timed_from_the_next() {
+        let db = mem();
+        let a = Fake::new("lrclib", Ok(Some(WORDS)));
+        let b = Fake::new("netease", Ok(Some(TIMED_WORDS)));
+        let r = resolve(&db, &song(), None, &[&a, &b], 1);
+        assert_eq!((r.source.as_deref(), r.parsed.kind()), (Some("netease"), "line"));
+    }
+    #[test] fn plain_is_kept_when_no_site_has_timing() {
+        let db = mem();
+        let a = Fake::new("lrclib", Ok(Some(WORDS)));
+        let b = Fake::new("netease", Ok(None));
+        let r = resolve(&db, &song(), None, &[&a, &b], 1);
+        assert_eq!((r.source.as_deref(), r.parsed.kind()), (Some("lrclib"), "plain"));
+        // no timed version: not asked again for a week
+        resolve(&db, &song(), None, &[&a, &b], 2);
+        assert_eq!((a.n(), b.n()), (1, 1));
+        resolve(&db, &song(), None, &[&a, &b], 2 + NONE_TTL_SECS);
+        assert_eq!((a.n(), b.n()), (2, 2));
+    }
+    fn pin_plain(db: &Mutex<Db>, source: &str) {
+        let row = LyricRow { status: "ok".into(), source: Some(source.into()), ext_id: Some("3".into()), plain: Some(WORDS.into()),
+                             pinned: true, fetched: 1, ..Default::default() };
+        db.lock().unwrap().put_lyric("s1", &row).unwrap();
+    }
+    #[test] fn a_plain_online_choice_gains_timing_and_stays_chosen() {
+        let db = mem();
+        pin_plain(&db, "lrclib");
+        let f = Fake::new("netease", Ok(Some(TIMED_WORDS)));
+        let r = resolve(&db, &song(), None, &[&f], 5);
+        assert_eq!(r.parsed.kind(), "line");
+        let row = db.lock().unwrap().lyric("s1").unwrap().unwrap();
+        assert!(row.pinned);
+        assert_eq!(row.source.as_deref(), Some("netease"));
+    }
+    #[test] fn a_plain_choice_is_not_replaced_by_other_words() {
+        let db = mem();
+        pin_plain(&db, "lrclib");
+        let f = Fake::new("netease", Ok(Some(OTHER_WORDS)));
+        let r = resolve(&db, &song(), None, &[&f], 5);
+        assert_eq!((r.source.as_deref(), r.parsed.kind()), (Some("lrclib"), "plain"));
+        assert_eq!(db.lock().unwrap().lyric("s1").unwrap().unwrap().plain.as_deref(), Some(WORDS));
+    }
+    #[test] fn a_lyric_file_the_user_chose_is_never_looked_up() {
+        let db = mem();
+        pin_plain(&db, "manual");
+        let f = Fake::new("netease", Ok(Some(TIMED_WORDS)));
+        assert_eq!(resolve(&db, &song(), None, &[&f], 5).parsed.kind(), "plain");
         assert_eq!(f.n(), 0);
+    }
+    #[test] fn a_failed_upgrade_still_shows_the_text_and_tries_again() {
+        let db = mem();
+        pin_plain(&db, "lrclib");
+        let bad = Fake::new("netease", Err(()));
+        assert_eq!(resolve(&db, &song(), None, &[&bad], 5).status, "ok");
+        assert_eq!(resolve(&db, &song(), None, &[&bad], 6).status, "ok");
+        assert_eq!(bad.n(), 2);
     }
     #[test] fn online_hit_is_cached() {
         let db = mem();
